@@ -1,0 +1,28 @@
+# Lana robot build overlay (used as the last SDKCONFIG_DEFAULTS file)
+CONFIG_BOARD_TYPE_LANA_TIM=y
+CONFIG_OLED_SSD1306_128X64=y
+CONFIG_PARTITION_TABLE_CUSTOM=y
+CONFIG_PARTITION_TABLE_CUSTOM_FILENAME="partitions/v2/16m_lana.csv"
+# Fallback only: the robot keeps the OTA URL saved in NVS (wifi/ota_url) if one is set
+CONFIG_OTA_URL="https://xiaozhi.naelnguyen.dev/ota/"
+CONFIG_LANGUAGE_VI_VN=y
+# Wake phrases: MultiNet7 Chinese (pinyin) like the vendor firmware that already wakes on "hai la na";
+# several phrases separated by ';'
+CONFIG_SR_WN_WN9_NIHAOXIAOZHI_TTS=n
+CONFIG_USE_CUSTOM_WAKE_WORD=y
+CONFIG_SR_MN_EN_NONE=y
+CONFIG_SR_MN_EN_MULTINET7_QUANT=n
+CONFIG_SR_MN_CN_NONE=n
+CONFIG_SR_MN_CN_MULTINET7_QUANT=y
+CONFIG_CUSTOM_WAKE_WORD_THRESHOLD=20
+# Pinyin approximations of the Vietnamese calls (ESP-SR has no Vietnamese model):
+#   hai la na ~ "Hi Lana", hei la na ~ "Hey Lana", ha lou la na ~ "Hello Lana" (these 3 = vendor fw),
+#   la na ei ~ "Lana ơi", jiao la na ~ "Chào Lana". Display text is sent to the server as the wake word.
+CONFIG_CUSTOM_WAKE_WORD="hai la na;hei la na;ha lou la na;la na ei;jiao la na"
+CONFIG_CUSTOM_WAKE_WORD_DISPLAY="Hi Lana;Hey Lana;Hello Lana;Lana ơi;Chào Lana"
+# Match the vendor image: DIO 80 MHz, console on USB-Serial-JTAG (GPIO43/44 = tank motor B)
+CONFIG_ESPTOOLPY_FLASHMODE_QIO=n
+CONFIG_ESPTOOLPY_FLASHMODE_DIO=y
+CONFIG_ESPTOOLPY_FLASHFREQ_80M=y
+CONFIG_ESP_CONSOLE_USB_SERIAL_JTAG=y
+CONFIG_ESP_CONSOLE_UART_DEFAULT=n

@@ -8,6 +8,9 @@
 #include <esp_mn_models.h>
 #include <esp_mn_speech_commands.h>
 #include <cJSON.h>
+#include <algorithm>
+#include <string>
+#include <vector>
 
 
 #define TAG "CustomWakeWord"
@@ -93,7 +96,29 @@ bool CustomWakeWord::Initialize(AudioCodec* codec, srmodel_list_t* models_list) 
         models_ = esp_srmodel_init("model");
 #ifdef CONFIG_CUSTOM_WAKE_WORD
         threshold_ = CONFIG_CUSTOM_WAKE_WORD_THRESHOLD / 100.0f;
-        commands_.push_back({CONFIG_CUSTOM_WAKE_WORD, CONFIG_CUSTOM_WAKE_WORD_DISPLAY, "wake"});
+        // Several wake phrases may be given separated by ';' (display texts likewise)
+        {
+            auto split = [](const std::string& s) {
+                std::vector<std::string> out;
+                size_t start = 0;
+                while (start <= s.size()) {
+                    size_t end = s.find(';', start);
+                    if (end == std::string::npos) end = s.size();
+                    std::string item = s.substr(start, end - start);
+                    while (!item.empty() && item.front() == ' ') item.erase(item.begin());
+                    while (!item.empty() && item.back() == ' ') item.pop_back();
+                    if (!item.empty()) out.push_back(item);
+                    start = end + 1;
+                }
+                return out;
+            };
+            auto words = split(CONFIG_CUSTOM_WAKE_WORD);
+            auto texts = split(CONFIG_CUSTOM_WAKE_WORD_DISPLAY);
+            for (size_t i = 0; i < words.size(); i++) {
+                std::string text = texts.empty() ? words[i] : texts[std::min(i, texts.size() - 1)];
+                commands_.push_back({words[i], text, "wake"});
+            }
+        }
 #endif
     } else {
         models_ = models_list;

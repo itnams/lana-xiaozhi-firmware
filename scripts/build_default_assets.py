@@ -600,6 +600,18 @@ def read_custom_wake_word_from_sdkconfig(sdkconfig_path):
     return None
 
 
+def split_wake_word_commands(wake_words, displays):
+    """Several wake phrases separated by ';' -> one multinet 'wake' command each.
+    Display texts are matched by position; missing ones reuse the last display text."""
+    words = [w.strip() for w in wake_words.split(';') if w.strip()]
+    texts = [t.strip() for t in displays.split(';') if t.strip()]
+    commands = []
+    for i, word in enumerate(words):
+        text = texts[min(i, len(texts) - 1)] if texts else word
+        commands.append({"command": word, "text": text, "action": "wake"})
+    return commands
+
+
 def get_language_from_multinet_models(multinet_models):
     """
     Determine language from multinet model names
@@ -846,13 +858,8 @@ def main():
             "language": language,
             "duration": 3000,  # Default duration in ms
             "threshold": custom_wake_word_config['threshold'],
-            "commands": [
-                {
-                    "command": custom_wake_word_config['wake_word'],
-                    "text": custom_wake_word_config['display'],
-                    "action": "wake"
-                }
-            ]
+            "commands": split_wake_word_commands(custom_wake_word_config['wake_word'],
+                                                 custom_wake_word_config['display'])
         }
         print(f"  custom wake word: {custom_wake_word_config['wake_word']} ({custom_wake_word_config['display']})")
         print(f"  wake word language: {language}")

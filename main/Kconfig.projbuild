@@ -120,6 +120,9 @@ choice BOARD_TYPE
     config BOARD_TYPE_BREAD_COMPACT_WIFI
         bool "Bread Compact WiFi (面包板)"
         depends on IDF_TARGET_ESP32S3
+    config BOARD_TYPE_LANA_TIM
+        bool "Lana robot (xiaozhi.vn purple ESP32-S3 + SSD1306)"
+        depends on IDF_TARGET_ESP32S3
     config BOARD_TYPE_BREAD_COMPACT_WIFI_LCD
         bool "Bread Compact WiFi + LCD (面包板)"
         depends on IDF_TARGET_ESP32S3
@@ -468,7 +471,7 @@ choice ESP_S3_LCD_EV_Board_Version_TYPE
 endchoice
 
 choice DISPLAY_OLED_TYPE
-    depends on BOARD_TYPE_BREAD_COMPACT_WIFI || BOARD_TYPE_BREAD_COMPACT_ML307 || BOARD_TYPE_BREAD_COMPACT_ESP32
+    depends on BOARD_TYPE_BREAD_COMPACT_WIFI || BOARD_TYPE_LANA_TIM || BOARD_TYPE_BREAD_COMPACT_ML307 || BOARD_TYPE_BREAD_COMPACT_ESP32
     prompt "OLED Type"
     default OLED_SSD1306_128X32
     help
@@ -607,14 +610,17 @@ config CUSTOM_WAKE_WORD
     default "xiao tu dou"
     depends on USE_CUSTOM_WAKE_WORD
     help
-        Custom Wake Word, use pinyin for Chinese, separated by spaces
+        Custom Wake Word, use pinyin for Chinese, separated by spaces.
+        Several wake phrases can be given separated by ';' (e.g. "hai la na;la na ei").
 
 config CUSTOM_WAKE_WORD_DISPLAY
     string "Custom Wake Word Display"
     default "小土豆"
     depends on USE_CUSTOM_WAKE_WORD
     help
-        Greeting sent to the server after wake word detection
+        Greeting sent to the server after wake word detection.
+        With several wake phrases, give one display text per phrase separated by ';'
+        (missing entries reuse the last one).
 
 config CUSTOM_WAKE_WORD_THRESHOLD
     int "Custom Wake Word Threshold (%)"
