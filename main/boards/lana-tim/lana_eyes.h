@@ -16,12 +16,15 @@ namespace lana_eyes {
 
 enum Emotion {
     kNeutral, kHappy, kLaughing, kFunny, kSad, kAngry, kCrying, kLoving, kEmbarrassed, kSurprised, kShocked,
-    kThinking, kWinking, kCool, kRelaxed, kDelicious, kKissy, kConfident, kSleepy, kSilly, kConfused, kEmotionCount
+    kThinking, kWinking, kCool, kRelaxed, kDelicious, kKissy, kConfident, kSleepy, kSilly, kConfused,
+    kAlarm,   // Lana extra (not one of the 21 server emotions): ringing alarm / reminder
+    kEmotionCount
 };
 
 static const char* const kEmotionNames[kEmotionCount] = {
     "neutral", "happy", "laughing", "funny", "sad", "angry", "crying", "loving", "embarrassed", "surprised",
-    "shocked", "thinking", "winking", "cool", "relaxed", "delicious", "kissy", "confident", "sleepy", "silly", "confused"};
+    "shocked", "thinking", "winking", "cool", "relaxed", "delicious", "kissy", "confident", "sleepy", "silly", "confused",
+    "alarm"};
 
 inline int EmotionFromName(const char* name) {
     if (!name) return -1;
@@ -50,7 +53,7 @@ struct Face {
 
 enum Anim { kAnimNone = 0, kAnimBounce = 1, kAnimTremble = 2, kAnimWobble = 4, kAnimHearts = 8, kAnimTears = 16,
             kAnimZzz = 32, kAnimDots = 64, kAnimBlush = 128, kAnimGlasses = 256, kAnimWinkR = 512, kAnimKiss = 1024,
-            kAnimNoBlink = 2048, kAnimSlow = 4096, kAnimLookSwap = 8192 };
+            kAnimNoBlink = 2048, kAnimSlow = 4096, kAnimLookSwap = 8192, kAnimBell = 16384 };
 
 inline const Face& FaceFor(int e) {
     //                  w    h    r   dx  dy  lidO lidI smile
@@ -76,6 +79,7 @@ inline const Face& FaceFor(int e) {
         /*sleepy*/     {{28, 26, 10,  0,  4, 0.68f, 0.68f, 0.00f}, {28, 26, 10, 0, 4, 0.72f, 0.68f, 0.00f}, kAnimZzz | kAnimSlow | kAnimNoBlink, 0, 2},
         /*silly*/      {{32, 34, 15,  0, -1, 0.00f, 0.00f, 0.00f}, {20, 20,  9, 0, 3, 0.00f, 0.00f, 0.00f}, kAnimWobble, 0, 0},
         /*confused*/   {{24, 30,  9,  0, -1, 0.00f, 0.00f, 0.00f}, {26, 20,  8, 0, 3, 0.10f, 0.40f, 0.00f}, kAnimLookSwap, 4, 0},
+        /*alarm*/      {{26, 26, 13,  0,  3, 0.00f, 0.00f, 0.00f}, {26, 26, 13, 0, 3, 0.00f, 0.00f, 0.00f}, kAnimTremble | kAnimNoBlink | kAnimBell, 0, 2},
     };
     if (e < 0 || e >= kEmotionCount) e = kNeutral;
     return faces[e];
@@ -227,6 +231,7 @@ public:
             }
         }
         if (f.anim & kAnimZzz) DrawZzz(px, area_h);
+        if (f.anim & kAnimBell) DrawBell(px, 64 + ((((t_ / 90) % 2) ? 2 : -2)), 9, (t_ / 180) % 2 == 0, area_h);
         if (f.anim & kAnimDots) {
             int n = (int)(t_ / 450) % 4;
             for (int k = 0; k < n; k++) FillCircle(px, 100 + k * 7, 8 - k * 1.5f, 1.6f + k * 0.4f, area_h);
@@ -236,6 +241,34 @@ public:
             DrawHeart(px, 98 + 8 * ph, area_h - 8 - ph * (area_h - 14), 5.5f, area_h);
         }
         if (volume_ms_ > 0) DrawVolume(px);
+    }
+
+    // Idle clock: big HH:MM on the left (rows 0..clock_h), a small sleeping face with drifting Zzz on the right.
+    // Called at ~4 fps by the display task; t_ (advanced by Step) drives the slow breathing / Zzz animation.
+    void RenderClock(uint8_t* px, int hh, int mm, int ss, int area_h) const {
+        memset(px, 0, W * H);
+        const int dh = 26, dw = 15, th = 3, y0 = 2;
+        int x = 3;
+        auto digit = [&](int d) { DrawDigit(px, x, y0, dw, dh, th, d, area_h); x += dw + 4; };
+        digit(hh / 10); digit(hh % 10);
+        if (ss % 2 == 0) {                                    // blinking colon
+            FillRect(px, x, y0 + 7, 3, 3, area_h); FillRect(px, x, y0 + dh - 10, 3, 3, area_h);
+        }
+        x += 7;
+        digit(mm / 10); digit(mm % 10);
+        // sleeping face: closed eyes that slowly 'breathe' (rise and fall)
+        float br = std::sin(t_ / 1000.0f * 2 * 3.14159f / 4.0f);   // 4 s breath
+        float ey = 21 + br * 1.2f;
+        DrawSleepEye(px, 100, ey, 6, area_h);
+        DrawSleepEye(px, 119, ey, 6, area_h);
+        // three z's drifting up and growing, one after the other
+        for (int k = 0; k < 3; k++) {
+            float ph = std::fmod(t_ / 3600.0f + k / 3.0f, 1.0f);
+            int sz = 2 + (int)(ph * 4);
+            int zx = 106 + (int)(ph * 12), zy = (int)(13 - ph * 12);
+            if (zy < 0) continue;
+            for (int i = 0; i <= sz; i++) { Set(px, zx + i, zy, area_h); Set(px, zx + i, zy + sz, area_h); Set(px, zx + sz - i, zy + i, area_h); }
+        }
     }
 
     // Pack to the SSD1306-style 1bpp, row-major MSB-first (for previews / I1 images)
@@ -341,6 +374,48 @@ private:
             int zx = 104 + (int)(ph * 14) + k, zy = (int)(area_h - 10 - ph * (area_h - 6));
             for (int i = 0; i <= s; i++) { Set(px, zx + i, zy, area_h); Set(px, zx + i, zy + s, area_h); Set(px, zx + s - i, zy + i, area_h); }
         }
+    }
+
+    static void FillRect(uint8_t* px, int x, int y, int w, int h, int area_h) {
+        for (int j = y; j < y + h; j++) for (int i = x; i < x + w; i++) Set(px, i, j, area_h);
+    }
+
+    // 7-segment digit with rounded (chamfered) segment ends
+    static void DrawDigit(uint8_t* px, int x, int y, int w, int h, int t, int d, int area_h) {
+        static const uint8_t seg[10] = {0x3F, 0x06, 0x5B, 0x4F, 0x66, 0x6D, 0x7D, 0x07, 0x7F, 0x6F};  // gfedcba
+        uint8_t m = seg[d < 0 || d > 9 ? 8 : d];
+        int hm = h / 2;
+        auto hseg = [&](int yy) { FillRect(px, x + 1, yy, w - 2, t, area_h); Clear(px, x + 1, yy, area_h); Clear(px, x + w - 2, yy, area_h);
+                                  Clear(px, x + 1, yy + t - 1, area_h); Clear(px, x + w - 2, yy + t - 1, area_h); };
+        auto vseg = [&](int xx, int ya, int yb) { FillRect(px, xx, ya + 1, t, yb - ya - 1, area_h); };
+        if (m & 0x01) hseg(y);
+        if (m & 0x40) hseg(y + hm - t / 2);
+        if (m & 0x08) hseg(y + h - t);
+        if (m & 0x20) vseg(x, y + 1, y + hm);            // f
+        if (m & 0x02) vseg(x + w - t, y + 1, y + hm);    // b
+        if (m & 0x10) vseg(x, y + hm, y + h - 1);        // e
+        if (m & 0x04) vseg(x + w - t, y + hm, y + h - 1);// c
+    }
+
+    // Closed sleeping eye: a gentle u-shaped lash line
+    static void DrawSleepEye(uint8_t* px, float cx, float cy, float half_w, int area_h) {
+        for (int x = (int)(cx - half_w); x <= (int)(cx + half_w); x++) {
+            float u = (x - cx) / half_w;
+            float y = cy + 2.5f * (1 - u * u);
+            Set(px, x, (int)y, area_h); Set(px, x, (int)y + 1, area_h);
+        }
+    }
+
+    // Alarm bell with ringing marks
+    static void DrawBell(uint8_t* px, int cx, int cy, bool ring, int area_h) {
+        for (int y = -6; y <= 4; y++) {
+            float hw = y < -3 ? 2.0f + (y + 6) * 0.6f : 3.8f + (y + 3) * 0.45f;
+            for (int x = (int)(-hw); x <= (int)hw; x++) Set(px, cx + x, cy + y, area_h);
+        }
+        FillRect(px, cx - 7, cy + 5, 15, 1, area_h);
+        FillCircle(px, cx, cy + 7.5f, 1.6f, area_h);
+        Set(px, cx, cy - 7, area_h);
+        if (ring) for (int k = 0; k < 3; k++) { Set(px, cx - 9 - k, cy - 3 + k * 3, area_h); Set(px, cx + 9 + k, cy - 3 + k * 3, area_h); }
     }
 
     void DrawVolume(uint8_t* px) const {

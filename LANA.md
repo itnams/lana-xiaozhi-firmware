@@ -55,3 +55,12 @@ Never commit `.bin` files, `sdkconfig`, Wi-Fi credentials or device tokens.
   pull-up. Click = +/-10, hold 1 s = 100 / mute. Shown in the status bar + bar under the eyes.
 * **OTA**: version `2.1.0-lana`; the OTA reply may contain `"assets": {"version","url"}` -> queued in
   Settings("assets"), device reboots and downloads it, stores `version` (or `fail_version`, no retry loop).
+
+## 2.2.0-lana
+- **Server push** (`{"type":"lana",...}` over MQTT, forwarded by the gateway's `/lana/ctl` link):
+  - `say {id,text,alarm}`: when idle, opens a channel and sends listen-detect `lana_push:<id>`; the server (robotsay.py) then plays that exact text. If already listening/speaking it does nothing (the server plays in-session). `alarm` shows the alarm face (trembling eyes + bell) and rings 3x.
+  - `config {clock_idle_min}`: persisted in NVS `lana/clock_idle_min`.
+  - `stop`: ends an alarm / the session.
+- **Idle clock**: after `clock_idle_min` (default 2, 0 = off) minutes idle in standby, the OLED shows 7-segment HH:MM, sleeping eyes and Zzz, plus the Vietnamese date line; renders at 4 fps. Wake word, button, or server push brings the normal face back. Time comes from SNTP pool.ntp.org with TZ ICT-7; for lana-tim the OTA `server_time` is taken as true UTC (no extra offset added).
+- **Wake words (Vietnamese pronunciation)**, threshold 0.15: `hai la na; hei la na; hai lan na; ha lou la na; la na ei; la na wei; la na ai; zhao la na; jiao la na; chao la na; la na la na`.
+- Previews: `tools/eyes_preview.cc` scenarios `clock_idle` and `emotion_alarm`.

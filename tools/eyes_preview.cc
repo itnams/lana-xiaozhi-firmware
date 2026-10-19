@@ -28,11 +28,24 @@ static void run(const std::string& dir, const std::string& name, int emotion, St
 
 int main(int argc, char** argv) {
     std::string dir = argc > 1 ? argv[1] : ".";
-    for (int e = 0; e < kEmotionCount; e++) run(dir, std::string("emotion_") + kEmotionNames[e], e, kStateSpeaking, 4000);
+    for (int e = 0; e < kEmotionCount; e++) run(dir, std::string("emotion_") + kEmotionNames[e], e, kStateSpeaking, 4000, e == kAlarm ? 18 : 0);
     run(dir, "state_idle", kNeutral, kStateIdle, 8000);
     run(dir, "state_listening", kNeutral, kStateListening, 4000);
     run(dir, "state_speaking", kNeutral, kStateSpeaking, 4000, 18);
     run(dir, "state_connecting", kNeutral, kStateConnecting, 4000);
     run(dir, "volume_70", kNeutral, kStateIdle, 2000, 0, 70);
+    {   // idle clock (date line is an LVGL label below, 18 px), 4 fps like on the robot -> frames repeated to 40 ms
+        Renderer r(5);
+        FILE* f = fopen((dir + "/clock_idle.raw").c_str(), "wb");
+        static uint8_t px[Renderer::W * Renderer::H];
+        for (int t = 0; t < 8000; t += 250) {
+            r.Step(250);
+            int sec = 58 + t / 1000;
+            int mm = 7 + sec / 60;
+            r.RenderClock(px, 21, mm % 60, sec % 60, Renderer::H - 18);
+            for (int k = 0; k < 6; k++) fwrite(px, 1, sizeof(px), f);
+        }
+        fclose(f);
+    }
     return 0;
 }

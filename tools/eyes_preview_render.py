@@ -6,7 +6,7 @@ from PIL import Image, ImageDraw, ImageFont
 W, H, TOP, S = 128, 48, 16, 4
 FONT = "/usr/share/fonts/truetype/sand-box/google/Be Vietnam Pro/BeVietnamPro-Medium.ttf"
 STATUS = {"state_idle": "Chờ", "state_listening": "Đang lắng nghe...", "state_connecting": "Đang kết nối...",
-          "volume_70": "Âm lượng 70"}
+          "volume_70": "Âm lượng 70", "clock_idle": "Chờ"}
 ON, OFF = (150, 225, 255), (4, 6, 10)
 
 def frame(raw, status, subtitle=None):
@@ -31,7 +31,8 @@ def main():
         name = fn[:-4]; data = open(os.path.join(src, fn), "rb").read()
         n = len(data) // (W * H)
         status = STATUS.get(name, "Đang nói...")
-        sub = "Dạ con nghe nè ba!" if name in ("state_speaking",) else None
+        sub = {"state_speaking": "Dạ con nghe nè ba!", "clock_idle": "Thứ Hai, 19/10/2026",
+               "emotion_alarm": "Ba ơi dậy đi ạ!"}.get(name)
         frames = [frame(data[i * W * H:(i + 1) * W * H], status, sub) for i in range(0, n, 1)]
         frames[0].save(os.path.join(out, name + ".gif"), save_all=True, append_images=frames[1:], duration=40, loop=0)
         if name.startswith("emotion_"):

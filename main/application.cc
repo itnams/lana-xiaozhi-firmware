@@ -16,6 +16,8 @@
 #include <driver/gpio.h>
 #include <arpa/inet.h>
 #include <font_awesome.h>
+#include <esp_netif_sntp.h>
+#include <ctime>
 
 #define TAG "Application"
 
@@ -400,6 +402,7 @@ void Application::Start() {
 
     /* Wait for the network to be ready */
     board.StartNetwork();
+    LanaStartTime();
 
     // Update the status bar immediately to show the network state
     display->UpdateStatusBar(true);
@@ -520,6 +523,8 @@ void Application::Start() {
                     ESP_LOGW(TAG, "Unknown system command: %s", command->valuestring);
                 }
             }
+        } else if (strcmp(type->valuestring, "lana") == 0) {
+            HandleLanaMessage(root);
         } else if (strcmp(type->valuestring, "alert") == 0) {
             auto status = cJSON_GetObjectItem(root, "status");
             auto message = cJSON_GetObjectItem(root, "message");
@@ -908,4 +913,95 @@ void Application::SetAecMode(AecMode mode) {
 
 void Application::PlaySound(const std::string_view& sound) {
     audio_service_.PlaySound(sound);
+}
+
+// ---------------------------------------------------------------------------------------------
+// Lana additions
+// ---------------------------------------------------------------------------------------------
+
+// Clock: TZ = ICT-7 (Asia/Bangkok / Vietnam), SNTP from pool.ntp.org; the OTA reply's server_time is the fallback.
+void Application::LanaStartTime() {
+    setenv("TZ", "ICT-7", 1);
+    tzset();
+    static bool started = false;
+    if (started) return;
+    started = true;
+    esp_sntp_config_t config = ESP_NETIF_SNTP_DEFAULT_CONFIG("pool.ntp.org");
+    config.start = true;
+    config.wait_for_sync = false;
+    if (esp_netif_sntp_init(&config) != ESP_OK) {
+        ESP_LOGW(TAG, "SNTP init failed, using the server time from the OTA reply");
+    }
+    Settings settings("lana");
+    Board::GetInstance().GetDisplay()->SetIdleClockMinutes(settings.GetInt("clock_idle_min", 2));
+}
+
+// {"type":"lana","action":"say","id":"r12","text":"...","alarm":true}  -> ring (alarm) + open the audio channel and
+//    tell the server "lana_push:<id>" as the wake word; the server then speaks the text (verbatim or via Gemini).
+// {"type":"lana","action":"config","clock_idle_min":2}
+// {"type":"lana","action":"stop"}  -> back to the normal face
+void Application::HandleLanaMessage(const cJSON* root) {
+    auto action = cJSON_GetObjectItem(root, "action");
+    if (!cJSON_IsString(action)) return;
+    std::string act = action->valuestring;
+    if (act == "say") {
+        auto id = cJSON_GetObjectItem(root, "id");
+        auto text = cJSON_GetObjectItem(root, "text");
+        auto alarm = cJSON_GetObjectItem(root, "alarm");
+        std::string sid = cJSON_IsString(id) ? id->valuestring : "";
+        std::string clean;
+        for (char ch : sid) if (isalnum((unsigned char)ch) || ch == '-' || ch == '_') clean += ch;   // goes into a JSON string
+        std::string t = cJSON_IsString(text) ? text->valuestring : "";
+        bool is_alarm = cJSON_IsTrue(alarm);
+        Schedule([this, clean, t, is_alarm]() { LanaPushSay(clean, t, is_alarm); });
+    } else if (act == "config") {
+        auto m = cJSON_GetObjectItem(root, "clock_idle_min");
+        if (cJSON_IsNumber(m)) {
+            int v = m->valueint;
+            Schedule([v]() {
+                Settings settings("lana", true);
+                if (settings.GetInt("clock_idle_min", 2) != v) settings.SetInt("clock_idle_min", v);
+                Board::GetInstance().GetDisplay()->SetIdleClockMinutes(v);
+            });
+        }
+    } else if (act == "stop") {
+        Schedule([this]() {
+            auto display = Board::GetInstance().GetDisplay();
+            if (device_state_ == kDeviceStateIdle) DismissAlert();
+            else display->SetEmotion("neutral");
+        });
+    } else {
+        ESP_LOGW(TAG, "Unknown lana action: %s", act.c_str());
+    }
+}
+
+void Application::LanaPushSay(const std::string& id, const std::string& text, bool alarm) {
+    auto display = Board::GetInstance().GetDisplay();
+    ESP_LOGI(TAG, "Lana push %s (%s): %s", id.c_str(), alarm ? "alarm" : "say", text.c_str());
+    if (alarm) {
+        display->SetEmotion("alarm");
+        if (!text.empty()) display->SetChatMessage("system", text.c_str());
+        for (int i = 0; i < 3; i++) audio_service_.PlaySound(Lang::Sounds::OGG_VIBRATION);
+    }
+    if (!protocol_) return;
+    std::string wake = "lana_push:" + id;
+    if (device_state_ == kDeviceStateIdle) {
+        if (!protocol_->IsAudioChannelOpened()) {
+            SetDeviceState(kDeviceStateConnecting);
+            if (!protocol_->OpenAudioChannel()) {
+                // server unreachable: at least ring and show the text locally
+                Alert(alarm ? "Báo thức" : "Lana", text.c_str(), alarm ? "alarm" : "neutral", Lang::Sounds::OGG_VIBRATION);
+                audio_service_.EnableWakeWordDetection(true);
+                return;
+            }
+        }
+        protocol_->SendWakeWordDetected(wake);
+        SetListeningMode(aec_mode_ == kAecOff ? kListeningModeAutoStop : kListeningModeRealtime);
+        if (alarm) display->SetEmotion("alarm");
+    } else if (device_state_ == kDeviceStateListening || device_state_ == kDeviceStateSpeaking) {
+        // already in a conversation: the server plays it in that session by itself; sending a detect here could
+        // cut Lana's current reply, so nothing to do
+    } else {
+        ESP_LOGW(TAG, "Lana push ignored in state %s", STATE_STRINGS[device_state_]);
+    }
 }

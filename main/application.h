@@ -7,6 +7,7 @@
 #include <esp_timer.h>
 
 #include <string>
+#include <cJSON.h>
 #include <mutex>
 #include <deque>
 #include <memory>
@@ -89,6 +90,9 @@ private:
     void CheckNewVersion(Ota& ota);
     void CheckAssetsVersion();
     void ShowActivationCode(const std::string& code, const std::string& message);
+    void HandleLanaMessage(const cJSON* root);   // Lana: server push (say / alarm / config)
+    void LanaPushSay(const std::string& id, const std::string& text, bool alarm);
+    void LanaStartTime();
     void SetListeningMode(ListeningMode mode);
 };
 

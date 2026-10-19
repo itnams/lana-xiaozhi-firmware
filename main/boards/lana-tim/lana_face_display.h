@@ -21,6 +21,10 @@
 #include <string>
 #include <mutex>
 #include <algorithm>
+#include <ctime>
+#include <cctype>
+#include <sys/time.h>
+#include <esp_timer.h>
 
 LV_FONT_DECLARE(font_awesome_30_1);
 
@@ -30,6 +34,7 @@ public:
     static constexpr int kH = lana_eyes::Renderer::H;
     static constexpr int kSubtitleH = 18;
     static constexpr int kFrameMs = 40;   // 25 fps
+    static constexpr int kClockFrameMs = 250;
 
     LanaFaceDisplay(esp_lcd_panel_io_handle_t panel_io, esp_lcd_panel_handle_t panel, int width, int height,
                     bool mirror_x, bool mirror_y)
@@ -83,6 +88,14 @@ public:
         lv_label_set_text(subtitle_, "");
         lv_obj_add_flag(subtitle_, LV_OBJ_FLAG_HIDDEN);
 
+        date_ = lv_label_create(face_);   // idle clock: Vietnamese date line under the digits
+        lv_obj_set_width(date_, LV_HOR_RES);
+        lv_obj_set_style_text_align(date_, LV_TEXT_ALIGN_CENTER, 0);
+        lv_obj_align(date_, LV_ALIGN_BOTTOM_MID, 0, 0);
+        lv_label_set_text(date_, "");
+        lv_obj_add_flag(date_, LV_OBJ_FLAG_HIDDEN);
+        last_activity_us_ = esp_timer_get_time();
+
         xTaskCreatePinnedToCore([](void* arg) { static_cast<LanaFaceDisplay*>(arg)->RenderLoop(); },
                                 "lana_eyes", 3072, this, 1, &task_, 1);
     }
@@ -93,6 +106,7 @@ public:
             return;
         }
         int e = lana_eyes::EmotionFromName(emotion ? emotion : "neutral");
+        if (e != lana_eyes::kNeutral) Touch();
         if (e >= 0) {
             {
                 std::lock_guard<std::mutex> g(eyes_mutex_);
@@ -126,8 +140,15 @@ public:
                  strcmp(status, Lang::Strings::REGISTERING_NETWORK) == 0 || strcmp(status, Lang::Strings::CHECKING_NEW_VERSION) == 0 ||
                  strcmp(status, Lang::Strings::UPGRADING) == 0)
             s = lana_eyes::kStateConnecting;
-        std::lock_guard<std::mutex> g(eyes_mutex_);
-        eyes_.SetState(s);
+        // the idle status bar shows the time ("21:07") every second: that is still standby, not activity
+        bool is_clock = strlen(status) == 5 && status[2] == ':' && isdigit((unsigned char)status[0]) && isdigit((unsigned char)status[4]);
+        if (is_clock) return;
+        {
+            std::lock_guard<std::mutex> g(eyes_mutex_);
+            eyes_.SetState(s);
+            idle_ = (s == lana_eyes::kStateIdle && strcmp(status, Lang::Strings::STANDBY) == 0);
+        }
+        if (last_status_ != status) { last_status_ = status; Touch(); }
     }
 
     virtual void SetChatMessage(const char* role, const char* content) override {
@@ -137,11 +158,13 @@ public:
         }
         std::string s = content ? content : "";
         std::replace(s.begin(), s.end(), '\n', ' ');
+        if (!s.empty()) Touch();
         {
             std::lock_guard<std::mutex> g(eyes_mutex_);
             eyes_.SetReservedBottom(s.empty() ? 0 : kSubtitleH);
         }
         DisplayLockGuard lock(this);
+        subtitle_text_empty_ = s.empty();
         if (s.empty()) {
             lv_obj_add_flag(subtitle_, LV_OBJ_FLAG_HIDDEN);
         } else {
@@ -153,20 +176,65 @@ public:
     // Volume buttons: bar drawn under the eyes for 1.5 s (the status bar shows the text notification)
     void ShowVolume(int volume) {
         if (face_ == nullptr) return;
+        Touch();
         std::lock_guard<std::mutex> g(eyes_mutex_);
         eyes_.ShowVolume(volume, 1500);
     }
 
+    // Idle clock after this many minutes of standby without activity (0 = never)
+    virtual void SetIdleClockMinutes(int minutes) override { idle_clock_min_ = minutes < 0 ? 0 : (minutes > 120 ? 120 : minutes); }
+    // Any user/robot activity: leave the clock immediately
+    void Touch() { last_activity_us_ = esp_timer_get_time(); }
+
 private:
+    static bool TimeValid(struct tm& tmv) {
+        time_t now = time(nullptr);
+        localtime_r(&now, &tmv);
+        return tmv.tm_year + 1900 >= 2025;
+    }
+
+    bool WantClock(struct tm& tmv) {
+        if (!idle_ || idle_clock_min_ <= 0 || show_icon_) return false;
+        if (esp_timer_get_time() - last_activity_us_ < (int64_t)idle_clock_min_ * 60 * 1000000) return false;
+        return TimeValid(tmv);
+    }
+
+    // Show / hide the LVGL date label and the subtitle while in clock mode (lock held by caller)
+    void ApplyClockUi(bool on, const struct tm* tmv) {
+        if (on) {
+            static const char* const kDays[7] = {"Chủ Nhật", "Thứ Hai", "Thứ Ba", "Thứ Tư", "Thứ Năm", "Thứ Sáu", "Thứ Bảy"};
+            char buf[48];
+            snprintf(buf, sizeof(buf), "%s, %02d/%02d/%04d", kDays[tmv->tm_wday % 7], tmv->tm_mday, tmv->tm_mon + 1, tmv->tm_year + 1900);
+            if (date_text_ != buf) { date_text_ = buf; lv_label_set_text(date_, buf); }
+            lv_obj_remove_flag(date_, LV_OBJ_FLAG_HIDDEN);
+            lv_obj_add_flag(subtitle_, LV_OBJ_FLAG_HIDDEN);
+        } else {
+            lv_obj_add_flag(date_, LV_OBJ_FLAG_HIDDEN);
+            if (!subtitle_text_empty_) lv_obj_remove_flag(subtitle_, LV_OBJ_FLAG_HIDDEN);
+        }
+    }
+
     void RenderLoop() {
         TickType_t last = xTaskGetTickCount();
         while (true) {
             bool icon;
+            struct tm tmv;
+            bool clock = WantClock(tmv);
+            int frame_ms = clock ? kClockFrameMs : kFrameMs;    // 4 fps in clock mode: low CPU
             {
                 std::lock_guard<std::mutex> g(eyes_mutex_);
-                eyes_.Step(kFrameMs);
+                eyes_.Step(frame_ms);
                 icon = show_icon_;
-                if (!icon) eyes_.Render(scratch_);
+                if (clock) eyes_.RenderClock(scratch_, tmv.tm_hour, tmv.tm_min, tmv.tm_sec, kH - kSubtitleH);
+                else if (!icon) eyes_.Render(scratch_);
+            }
+            if (clock != clock_on_ && Lock(50)) {
+                clock_on_ = clock;
+                ApplyClockUi(clock, &tmv);
+                Unlock();
+            } else if (clock && tmv.tm_sec == 0 && Lock(20)) {
+                ApplyClockUi(true, &tmv);   // date roll-over
+                Unlock();
             }
             if (!icon) {
                 // 1 = lit -> L8 0x00 (black = lit pixel), 0 -> 0xFF
@@ -178,7 +246,7 @@ private:
                     Unlock();
                 }
             }
-            vTaskDelayUntil(&last, pdMS_TO_TICKS(kFrameMs));
+            vTaskDelayUntil(&last, pdMS_TO_TICKS(frame_ms));
         }
     }
 
@@ -193,4 +261,12 @@ private:
     lv_obj_t* icon_ = nullptr;
     lv_obj_t* subtitle_ = nullptr;
     TaskHandle_t task_ = nullptr;
+    lv_obj_t* date_ = nullptr;
+    std::string date_text_;
+    volatile bool idle_ = false;
+    volatile bool clock_on_ = false;
+    volatile int idle_clock_min_ = 2;
+    volatile int64_t last_activity_us_ = 0;
+    bool subtitle_text_empty_ = true;
+    std::string last_status_;
 };
