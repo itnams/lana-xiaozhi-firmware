@@ -37,7 +37,12 @@
 #define BOOT_BUTTON_GPIO        GPIO_NUM_0
 #define TOUCH_BUTTON_GPIO       GPIO_NUM_47   // "Wake" button (hold to talk)
 
-// Lana War Tank (vendor board mach-tim-wartank): L298 motor driver, no volume buttons.
+// Volume buttons (Lana add-on): momentary button between the GPIO and GND, internal pull-up, active LOW.
+// GPIO17/18 are on the left header, are not strapping/flash/PSRAM/USB pins and are unused by the tank.
+#define VOLUME_UP_BUTTON_GPIO   GPIO_NUM_18
+#define VOLUME_DOWN_BUTTON_GPIO GPIO_NUM_17
+
+// Lana War Tank (vendor board mach-tim-wartank): L298 motor driver (vendor had no volume buttons).
 // GPIO43/44 are UART0 TX/RX, so the console is on USB-Serial-JTAG.
 #define TANK_A_IN1_GPIO GPIO_NUM_39
 #define TANK_A_IN2_GPIO GPIO_NUM_40

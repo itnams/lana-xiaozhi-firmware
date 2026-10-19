@@ -107,6 +107,13 @@ void Application::CheckAssetsVersion() {
         board.SetPowerSaveMode(true);
         vTaskDelay(pdMS_TO_TICKS(1000));
 
+        // Lana: remember which assets version is installed (or failed, so the OTA reply cannot loop us)
+        std::string pending = settings.GetString("pending_version");
+        if (!pending.empty()) {
+            settings.EraseKey("pending_version");
+            settings.SetString(success ? "version" : "fail_version", pending);
+        }
+
         if (!success) {
             Alert(Lang::Strings::ERROR, Lang::Strings::DOWNLOAD_ASSETS_FAILED, "circle_xmark", Lang::Sounds::OGG_EXCLAMATION);
             vTaskDelay(pdMS_TO_TICKS(2000));
@@ -167,6 +174,13 @@ void Application::CheckNewVersion(Ota& ota) {
 
         // No new version, mark the current version as valid
         ota.MarkCurrentVersionValid();
+        if (ota.HasNewAssets()) {
+            // Lana: new assets were queued by the OTA reply; CheckAssetsVersion() downloads them after a reboot
+            ESP_LOGI(TAG, "New assets queued, rebooting to download them");
+            vTaskDelay(pdMS_TO_TICKS(500));
+            Reboot();
+            return;
+        }
         if (!ota.HasActivationCode() && !ota.HasActivationChallenge()) {
             xEventGroupSetBits(event_group_, MAIN_EVENT_CHECK_NEW_VERSION_DONE);
             // Exit the loop if done checking new version

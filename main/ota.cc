@@ -237,6 +237,27 @@ esp_err_t Ota::CheckVersion() {
         ESP_LOGW(TAG, "No firmware section found!");
     }
 
+    // Lana: optional "assets": {"version": "...", "url": "..."}. A version different from the installed one
+    // (and not one that already failed) is queued in Settings("assets") so CheckAssetsVersion() downloads it
+    // on the next boot; Application reboots right after the version check when HasNewAssets() is true.
+    has_new_assets_ = false;
+    cJSON *assets = cJSON_GetObjectItem(root, "assets");
+    if (cJSON_IsObject(assets)) {
+        cJSON *a_version = cJSON_GetObjectItem(assets, "version");
+        cJSON *a_url = cJSON_GetObjectItem(assets, "url");
+        if (cJSON_IsString(a_version) && cJSON_IsString(a_url) && a_version->valuestring[0] && a_url->valuestring[0]) {
+            Settings settings("assets", true);
+            std::string installed = settings.GetString("version");
+            std::string failed = settings.GetString("fail_version");
+            if (installed != a_version->valuestring && failed != a_version->valuestring) {
+                ESP_LOGI(TAG, "New assets %s (installed '%s'): %s", a_version->valuestring, installed.c_str(), a_url->valuestring);
+                settings.SetString("download_url", a_url->valuestring);
+                settings.SetString("pending_version", a_version->valuestring);
+                has_new_assets_ = true;
+            }
+        }
+    }
+
     cJSON_Delete(root);
     return ESP_OK;
 }

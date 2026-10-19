@@ -12,6 +12,8 @@
 
 #include <wifi_station.h>
 #include <esp_log.h>
+#include <algorithm>
+#include <string>
 #include <driver/i2c_master.h>
 #include <driver/gpio.h>
 #include <driver/ledc.h>
@@ -116,8 +118,11 @@ private:
     esp_lcd_panel_io_handle_t panel_io_ = nullptr;
     esp_lcd_panel_handle_t panel_ = nullptr;
     Display* display_ = nullptr;
+    LanaFaceDisplay* face_display_ = nullptr;
     Button boot_button_;
     Button touch_button_;
+    Button volume_up_button_;
+    Button volume_down_button_;
     TankDrive tank_;
 
     void InitializeDisplayI2c() {
@@ -190,7 +195,8 @@ private:
         ESP_LOGI(TAG, "Turning display on");
         ESP_ERROR_CHECK(esp_lcd_panel_disp_on_off(panel_, true));
 
-        display_ = new LanaFaceDisplay(panel_io_, panel_, DISPLAY_WIDTH, DISPLAY_HEIGHT, DISPLAY_MIRROR_X, DISPLAY_MIRROR_Y);
+        face_display_ = new LanaFaceDisplay(panel_io_, panel_, DISPLAY_WIDTH, DISPLAY_HEIGHT, DISPLAY_MIRROR_X, DISPLAY_MIRROR_Y);
+        display_ = face_display_;
     }
 
     void InitializeButtons() {
@@ -207,7 +213,25 @@ private:
         touch_button_.OnPressUp([this]() {
             Application::GetInstance().StopListening();
         });
-        // No volume buttons: GPIO39/40 drive the tank motors on this robot
+
+        // Volume buttons on GPIO18 (+) / GPIO17 (-): click = +/-10, long press (1 s) = max / mute
+        volume_up_button_.OnClick([this]() { ChangeVolume(+10); });
+        volume_up_button_.OnLongPress([this]() { SetVolume(100, Lang::Strings::MAX_VOLUME); });
+        volume_down_button_.OnClick([this]() { ChangeVolume(-10); });
+        volume_down_button_.OnLongPress([this]() { SetVolume(0, Lang::Strings::MUTED); });
+    }
+
+    void ChangeVolume(int delta) {
+        int v = std::max(0, std::min(100, GetAudioCodec()->output_volume() + delta));
+        SetVolume(v, nullptr);
+    }
+
+    void SetVolume(int v, const char* text) {
+        GetAudioCodec()->SetOutputVolume(v);
+        if (display_ == nullptr) return;
+        if (text) display_->ShowNotification(text);
+        else display_->ShowNotification(Lang::Strings::VOLUME + std::to_string(v));
+        if (face_display_) face_display_->ShowVolume(v);
     }
 
     // 物联网初始化，逐步迁移到 MCP 协议
@@ -255,7 +279,9 @@ private:
 public:
     LanaTimBoard() :
         boot_button_(BOOT_BUTTON_GPIO),
-        touch_button_(TOUCH_BUTTON_GPIO) {
+        touch_button_(TOUCH_BUTTON_GPIO),
+        volume_up_button_(VOLUME_UP_BUTTON_GPIO, false, 1000),
+        volume_down_button_(VOLUME_DOWN_BUTTON_GPIO, false, 1000) {
         TankDrive::HoldPinsLow();
         InitializeDisplayI2c();
         InitializeSsd1306Display();

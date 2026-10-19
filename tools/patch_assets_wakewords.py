@@ -43,8 +43,9 @@ def main():
     if a.language: mn["language"] = a.language
     mn["commands"] = [{"command": p.split("=", 1)[0].strip(), "text": (p.split("=", 1) + [p])[1].strip(), "action": "wake"}
                       for p in a.phrases]
-    idx[1] = json.dumps(j, ensure_ascii=False, indent=4).encode("utf-8")
+    idx[1] = (json.dumps(j, ensure_ascii=False, indent=4) + "\n").encode("utf-8")   # vendor file ends with \n
     out = pack(files)
+    out += b"\xff" * (-len(out) % 4)   # keep the image size 4-byte aligned like the vendor's (flashers pad anyway)
     assert unpack(out)[0][0] == files[0][0]
     open(a.out, "wb").write(out)
     print("files:", len(files), "| size %d -> %d bytes" % (len(blob.rstrip(b"\xff")), len(out)))

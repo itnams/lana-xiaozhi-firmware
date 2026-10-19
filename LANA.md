@@ -42,3 +42,16 @@ python -m esptool --chip esp32s3 -b 460800 write_flash --flash_mode dio --flash_
 
 A merged image written at 0x0 also overwrites NVS (0x9000) with 0xFF: Wi-Fi has to be set up again.
 Never commit `.bin` files, `sdkconfig`, Wi-Fi credentials or device tokens.
+
+## 2.1.0-lana
+
+* **Eyes** (`main/boards/lana-tim/lana_eyes.h`, portable renderer): rounded-rect eyes, random (double) blinks,
+  saccades/idle drift/breathing, a distinct face for each of the 21 emotions (hearts, tears, Zzz, thinking dots,
+  blush, sunglasses glint, wink, kiss), listening = bigger/steady, speaking = syllable bounce, connecting = scan.
+  `LanaFaceDisplay` renders it in its own task (prio 1, 25 fps) into a 128x48 L8 LVGL image; the LVGL lock is
+  only held for a 6 KB memcpy. Previews: `g++ -O2 -std=c++17 -I main/boards/lana-tim tools/eyes_preview.cc -o
+  /tmp/eyes_preview && /tmp/eyes_preview /tmp/raw && python3 tools/eyes_preview_render.py /tmp/raw out/`.
+* **Volume buttons**: Vol+ = GPIO18, Vol- = GPIO17 (left header). Button between GPIO and GND, internal
+  pull-up. Click = +/-10, hold 1 s = 100 / mute. Shown in the status bar + bar under the eyes.
+* **OTA**: version `2.1.0-lana`; the OTA reply may contain `"assets": {"version","url"}` -> queued in
+  Settings("assets"), device reboots and downloads it, stores `version` (or `fail_version`, no retry loop).
