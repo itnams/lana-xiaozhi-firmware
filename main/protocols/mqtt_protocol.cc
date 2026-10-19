@@ -270,6 +270,15 @@ bool MqttProtocol::OpenAudioChannel() {
     });
 
     udp_->Connect(udp_server_, udp_port_);
+#ifdef CONFIG_BOARD_TYPE_LANA_TIM
+    {   // Lana 2.2.2: one empty packet at once, so the MQTT+UDP gateway learns our (NAT) address before any reply
+        std::string warm(aes_nonce_);
+        *(uint16_t*)&warm[2] = 0;
+        *(uint32_t*)&warm[8] = 0;
+        *(uint32_t*)&warm[12] = htonl(++local_sequence_);
+        udp_->Send(warm);
+    }
+#endif
 
     if (on_audio_channel_opened_ != nullptr) {
         on_audio_channel_opened_();

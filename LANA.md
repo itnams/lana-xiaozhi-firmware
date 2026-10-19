@@ -72,3 +72,8 @@ Never commit `.bin` files, `sdkconfig`, Wi-Fi credentials or device tokens.
 - Clock-mode fix: the `lana_eyes` task stack goes from 3 KB to 8 KB (localtime_r + snprintf + lv_label in clock mode could overflow; suspected cause of reboots/hangs a few minutes after a conversation on 2.2.0). Logs the stack high-water mark when the clock toggles.
 - Server push `{"type":"lana","action":"reboot"}` (only when idle), e.g. to pick up an OTA offer.
 - Wi-Fi config hotspot SSID is `Lana-made-by-Nael` (no suffix); the portal is still http://192.168.4.1.
+
+## 2.2.2-lana
+- **No mic-off dead window while waiting for a reply (lana-tim only)**: the robot stays Listening (mic on) after you stop talking. The first reply audio packet itself switches it to Speaking. Packets that arrive before the main loop has switched are buffered in order (up to 120) and flushed after the decoder reset, so the start of the reply is not lost. The server therefore no longer needs to send an early `tts start` (server key `fw_buffers_audio_min`). Audio that arrives within 400 ms after a `tts stop` is dropped as a leftover from the previous reply. Guard: if Speaking was started by audio alone and neither `tts start` nor `tts stop` follows, the robot returns to Listening after 2.5 s without audio once playback is idle.
+- **UDP warm-up**: right after the audio channel opens, the robot sends one empty encrypted packet (payload_len 0, next sequence number). The MQTT+UDP gateway then learns the robot's address immediately instead of waiting for the first mic packet. The server ignores empty frames.
+- Assets unchanged from 2.2.1 (OTA ships the app only).

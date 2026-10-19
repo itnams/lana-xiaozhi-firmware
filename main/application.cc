@@ -440,9 +440,41 @@ void Application::Start() {
         xEventGroupSetBits(event_group_, MAIN_EVENT_ERROR);
     });
     protocol_->OnIncomingAudio([this](std::unique_ptr<AudioStreamPacket> packet) {
+#ifdef CONFIG_BOARD_TYPE_LANA_TIM
+        // Lana 2.2.2: the mic stays on while Listening; the first reply packet itself switches to Speaking. Packets
+        // that arrive before the main loop did the switch are kept (in order) instead of dropped.
+        int64_t now = esp_timer_get_time();
+        lana_last_rx_us_ = now;
+        std::lock_guard<std::mutex> lk(lana_early_mutex_);
+        if (device_state_ == kDeviceStateSpeaking && lana_early_.empty()) {
+            audio_service_.PushPacketToDecodeQueue(std::move(packet));
+            return;
+        }
+        if (device_state_ != kDeviceStateSpeaking && device_state_ != kDeviceStateListening) {
+            return;
+        }
+        if (device_state_ == kDeviceStateListening && now - lana_tts_stop_us_ < 400000) {
+            return;         // stragglers of a reply the server already ended (tts stop)
+        }
+        if (lana_early_.size() < 120) {
+            lana_early_.push_back(std::move(packet));
+        }
+        if (!lana_early_pending_) {
+            lana_early_pending_ = true;
+            Schedule([this]() {
+                if (device_state_ == kDeviceStateListening) {
+                    ESP_LOGI(TAG, "Lana: reply audio arrived -> speaking");
+                    lana_spk_by_audio_ = true;
+                    SetDeviceState(kDeviceStateSpeaking);
+                }
+                LanaFlushEarlyAudio();
+            });
+        }
+#else
         if (device_state_ == kDeviceStateSpeaking) {
             audio_service_.PushPacketToDecodeQueue(std::move(packet));
         }
+#endif
     });
     protocol_->OnAudioChannelOpened([this, codec, &board]() {
         board.SetPowerSaveMode(false);
@@ -467,12 +499,19 @@ void Application::Start() {
             if (strcmp(state->valuestring, "start") == 0) {
                 Schedule([this]() {
                     aborted_ = false;
+                    lana_spk_by_audio_ = false;
                     if (device_state_ == kDeviceStateIdle || device_state_ == kDeviceStateListening) {
                         SetDeviceState(kDeviceStateSpeaking);
                     }
                 });
             } else if (strcmp(state->valuestring, "stop") == 0) {
+                lana_tts_stop_us_ = esp_timer_get_time();
                 Schedule([this]() {
+                    lana_spk_by_audio_ = false;
+                    {
+                        std::lock_guard<std::mutex> lk(lana_early_mutex_);
+                        lana_early_.clear();
+                    }
                     if (device_state_ == kDeviceStateSpeaking) {
                         if (listening_mode_ == kListeningModeManualStop) {
                             SetDeviceState(kDeviceStateIdle);
@@ -621,6 +660,15 @@ void Application::MainEventLoop() {
 
         if (bits & MAIN_EVENT_CLOCK_TICK) {
             clock_ticks_++;
+#ifdef CONFIG_BOARD_TYPE_LANA_TIM
+            // speaking was started by stray audio and no tts start/stop followed: back to listening once it has played
+            if (device_state_ == kDeviceStateSpeaking && lana_spk_by_audio_ &&
+                esp_timer_get_time() - lana_last_rx_us_ > 2500000 && audio_service_.IsIdle()) {
+                ESP_LOGW(TAG, "Lana: speaking without tts start/stop and no audio for 2.5 s -> listening");
+                lana_spk_by_audio_ = false;
+                SetDeviceState(listening_mode_ == kListeningModeManualStop ? kDeviceStateIdle : kDeviceStateListening);
+            }
+#endif
             auto display = Board::GetInstance().GetDisplay();
             display->UpdateStatusBar();
         
@@ -982,6 +1030,19 @@ void Application::HandleLanaMessage(const cJSON* root) {
         });
     } else {
         ESP_LOGW(TAG, "Unknown lana action: %s", act.c_str());
+    }
+}
+
+void Application::LanaFlushEarlyAudio() {
+    std::lock_guard<std::mutex> lk(lana_early_mutex_);
+    lana_early_pending_ = false;
+    if (device_state_ == kDeviceStateSpeaking) {
+        while (!lana_early_.empty()) {
+            audio_service_.PushPacketToDecodeQueue(std::move(lana_early_.front()));
+            lana_early_.pop_front();
+        }
+    } else {
+        lana_early_.clear();
     }
 }
 

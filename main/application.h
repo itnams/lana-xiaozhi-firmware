@@ -83,6 +83,14 @@ private:
     bool has_server_time_ = false;
     bool aborted_ = false;
     int clock_ticks_ = 0;
+    // Lana 2.2.2: audio that arrives while still Listening is kept and starts the reply (no early tts start needed)
+    std::mutex lana_early_mutex_;
+    std::deque<std::unique_ptr<AudioStreamPacket>> lana_early_;
+    bool lana_early_pending_ = false;
+    bool lana_spk_by_audio_ = false;
+    int64_t lana_last_rx_us_ = 0;
+    int64_t lana_tts_stop_us_ = 0;
+    void LanaFlushEarlyAudio();
     TaskHandle_t check_new_version_task_handle_ = nullptr;
     TaskHandle_t main_event_loop_task_handle_ = nullptr;
 
