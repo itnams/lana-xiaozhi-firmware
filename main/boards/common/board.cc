@@ -9,6 +9,7 @@
 #include <esp_ota_ops.h>
 #include <esp_chip_info.h>
 #include <esp_random.h>
+#include <esp_system.h>
 
 #define TAG "Board"
 
@@ -108,6 +109,10 @@ std::string Board::GetSystemInfoJson() {
         }
     */
     std::string json = R"({"version":2,"language":")" + std::string(Lang::CODE) + R"(",)";
+#ifdef CONFIG_BOARD_TYPE_LANA_TIM
+    // Lana: why did we boot (1 power-on, 3 software, 4 panic, 5/6/7 watchdogs, 9 brownout) -> server log
+    json += R"("lana_reset":)" + std::to_string((int)esp_reset_reason()) + ",";
+#endif
     json += R"("flash_size":)" + std::to_string(SystemInfo::GetFlashSize()) + R"(,)";
     json += R"("minimum_free_heap_size":")" + std::to_string(SystemInfo::GetMinimumFreeHeapSize()) + R"(",)";
     json += R"("mac_address":")" + SystemInfo::GetMacAddress() + R"(",)";

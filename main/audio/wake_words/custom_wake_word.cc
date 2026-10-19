@@ -2,6 +2,7 @@
 #include "audio_service.h"
 #include "system_info.h"
 #include "assets.h"
+#include "settings.h"
 
 #include <esp_log.h>
 #include <esp_mn_iface.h>
@@ -15,12 +16,21 @@
 
 #define TAG "CustomWakeWord"
 
+// Lana: "<command>|<prob>" of the last detection, sent to the server with the wake detect (protocol.cc)
+std::string g_lana_wake_detail;
+
 
 CustomWakeWord::CustomWakeWord()
     : wake_word_pcm_(), wake_word_opus_() {
 }
 
 CustomWakeWord::~CustomWakeWord() {
+#ifdef LANA_WAKE_AFE
+    if (afe_data_ != nullptr) {
+        afe_iface_->destroy(afe_data_);
+        afe_data_ = nullptr;
+    }
+#endif
     if (multinet_model_data_ != nullptr && multinet_ != nullptr) {
         multinet_->destroy(multinet_model_data_);
         multinet_model_data_ = nullptr;
@@ -143,6 +153,10 @@ bool CustomWakeWord::Initialize(AudioCodec* codec, srmodel_list_t* models_list) 
     }
 
     multinet_ = esp_mn_handle_from_name(mn_name_);
+#ifdef LANA_WAKE_AFE
+    // longer window: resets now happen in silence (see DetectionTask), the timeout is only a fallback
+    if (duration_ < 6000) duration_ = 6000;
+#endif
     multinet_model_data_ = multinet_->create(mn_name_, duration_);
     multinet_->set_det_threshold(multinet_model_data_, threshold_);
     esp_mn_commands_clear();
@@ -152,27 +166,142 @@ bool CustomWakeWord::Initialize(AudioCodec* codec, srmodel_list_t* models_list) 
     esp_mn_commands_update();
     
     multinet_->print_active_speech_commands(multinet_model_data_);
+    ESP_LOGI(TAG, "MultiNet %s: %d commands, threshold %.2f, duration %d ms", mn_name_, (int)commands_.size(), threshold_, duration_);
+
+#ifdef LANA_WAKE_AFE
+    {
+        // crash guard: if the AFE path did not survive 20 s twice in a row, fall back to direct MultiNet
+        int afe_fail = 0;
+        {
+            Settings st("lana", true);
+            afe_fail = st.GetInt("afe_fail", 0);
+            if (afe_fail < 2) st.SetInt("afe_fail", afe_fail + 1);
+        }
+        std::string input_format(codec_->input_channels(), 'M');
+        afe_config_t* cfg = afe_fail >= 2 ? nullptr
+            : afe_config_init(input_format.c_str(), models_, AFE_TYPE_SR, AFE_MODE_HIGH_PERF);
+        if (afe_fail >= 2) ESP_LOGW(TAG, "AFE front end disabled by crash guard (lana/afe_fail=%d)", afe_fail);
+        if (cfg != nullptr) {
+            cfg->wakenet_init = false;
+            cfg->aec_init = false;
+            cfg->se_init = false;
+            cfg->ns_init = false;              // NS tends to smear consonants for ASR; AGC + VAD only
+            cfg->vad_init = true;
+            cfg->vad_mode = VAD_MODE_2;
+            cfg->vad_model_name = nullptr;     // WebRTC VAD
+            cfg->vad_min_noise_ms = 400;
+            cfg->agc_init = true;
+            cfg->agc_mode = AFE_AGC_MODE_WEBRTC;
+            cfg->agc_compression_gain_db = 12; // INMP441 at 1-3 m is quiet (about -35 dBFS speech)
+            cfg->agc_target_level_dbfs = 3;
+            cfg->afe_linear_gain = 1.0f;
+            cfg->afe_perferred_core = 1;
+            cfg->afe_perferred_priority = 5;
+            cfg->memory_alloc_mode = AFE_MEMORY_ALLOC_MORE_PSRAM;
+            afe_iface_ = esp_afe_handle_from_config(cfg);
+            afe_data_ = afe_iface_ ? afe_iface_->create_from_config(cfg) : nullptr;
+            afe_config_free(cfg);
+        }
+        if (afe_data_ == nullptr) {
+            ESP_LOGW(TAG, "AFE front end unavailable, feeding MultiNet directly");
+        } else {
+            ESP_LOGI(TAG, "AFE front end on: feed %d fetch %d mn %d", afe_iface_->get_feed_chunksize(afe_data_),
+                     afe_iface_->get_fetch_chunksize(afe_data_), multinet_->get_samp_chunksize(multinet_model_data_));
+            xTaskCreatePinnedToCore([](void* arg) {
+                static_cast<CustomWakeWord*>(arg)->DetectionTask();
+                vTaskDelete(NULL);
+            }, "lana_wake", 4096 * 2, this, 5, nullptr, 1);
+        }
+    }
+#endif
     return true;
 }
+
+#ifdef LANA_WAKE_AFE
+void CustomWakeWord::DetectionTask() {
+    const int mn_chunk = multinet_->get_samp_chunksize(multinet_model_data_);
+    mn_buf_.reserve(mn_chunk * 4);
+    int64_t fetched_ms = 0;
+    bool marked_ok = false;
+    while (true) {
+        if (!marked_ok && fetched_ms >= 20000) {
+            Settings st("lana", true);
+            st.SetInt("afe_fail", 0);
+            marked_ok = true;
+            ESP_LOGI(TAG, "AFE front end stable");
+        }
+        if (!running_) {
+            vTaskDelay(pdMS_TO_TICKS(30));
+            continue;
+        }
+        auto res = afe_iface_->fetch_with_delay(afe_data_, pdMS_TO_TICKS(200));
+        if (need_reset_) {
+            need_reset_ = false;
+            mn_buf_.clear();
+            multinet_->clean(multinet_model_data_);
+            silence_ms_ = 0;
+            cleaned_in_silence_ = true;
+        }
+        if (res == nullptr || res->ret_value == ESP_FAIL || !running_) {
+            continue;
+        }
+        int n = res->data_size / sizeof(int16_t);
+        int frame_ms = n * 1000 / 16000;
+        fetched_ms += frame_ms;
+        if (res->vad_state == VAD_SILENCE) {
+            silence_ms_ += frame_ms;
+            if (silence_ms_ >= 600 && !cleaned_in_silence_) {
+                multinet_->clean(multinet_model_data_);   // fresh decoder for the next utterance
+                cleaned_in_silence_ = true;
+            }
+        } else {
+            silence_ms_ = 0;
+            cleaned_in_silence_ = false;
+        }
+        StoreWakeWordData(std::vector<int16_t>(res->data, res->data + n));
+        mn_buf_.insert(mn_buf_.end(), res->data, res->data + n);
+        size_t off = 0;
+        while (mn_buf_.size() - off >= (size_t)mn_chunk && running_) {
+            DetectChunk(mn_buf_.data() + off);
+            off += mn_chunk;
+        }
+        mn_buf_.erase(mn_buf_.begin(), mn_buf_.begin() + off);
+    }
+}
+#endif
 
 void CustomWakeWord::OnWakeWordDetected(std::function<void(const std::string& wake_word)> callback) {
     wake_word_detected_callback_ = callback;
 }
 
 void CustomWakeWord::Start() {
+#ifdef LANA_WAKE_AFE
+    need_reset_ = true;
+#endif
     running_ = true;
 }
 
 void CustomWakeWord::Stop() {
     running_ = false;
+#ifdef LANA_WAKE_AFE
+    if (afe_data_ != nullptr) {
+        afe_iface_->reset_buffer(afe_data_);
+    }
+    need_reset_ = true;
+#endif
 }
 
 void CustomWakeWord::Feed(const std::vector<int16_t>& data) {
     if (multinet_model_data_ == nullptr || !running_) {
         return;
     }
+#ifdef LANA_WAKE_AFE
+    if (afe_data_ != nullptr) {
+        afe_iface_->feed(afe_data_, data.data());
+        return;
+    }
+#endif
 
-    esp_mn_state_t mn_state;
     // If input channels is 2, we need to fetch the left channel data
     if (codec_->input_channels() == 2) {
         auto mono_data = std::vector<int16_t>(data.size() / 2);
@@ -181,12 +310,15 @@ void CustomWakeWord::Feed(const std::vector<int16_t>& data) {
         }
 
         StoreWakeWordData(mono_data);
-        mn_state = multinet_->detect(multinet_model_data_, const_cast<int16_t*>(mono_data.data()));
+        DetectChunk(mono_data.data());
     } else {
         StoreWakeWordData(data);
-        mn_state = multinet_->detect(multinet_model_data_, const_cast<int16_t*>(data.data()));
+        DetectChunk(const_cast<int16_t*>(data.data()));
     }
-    
+}
+
+void CustomWakeWord::DetectChunk(int16_t* chunk) {
+    esp_mn_state_t mn_state = multinet_->detect(multinet_model_data_, chunk);
     if (mn_state == ESP_MN_STATE_DETECTING) {
         return;
     } else if (mn_state == ESP_MN_STATE_DETECTED) {
@@ -197,6 +329,9 @@ void CustomWakeWord::Feed(const std::vector<int16_t>& data) {
             auto& command = commands_[mn_result->command_id[i] - 1];
             if (command.action == "wake") {
                 last_detected_wake_word_ = command.text;
+                char detail[96];
+                snprintf(detail, sizeof(detail), "%s|%.3f", command.command.c_str(), mn_result->prob[i]);
+                g_lana_wake_detail = detail;
                 running_ = false;
                 
                 if (wake_word_detected_callback_) {
@@ -215,6 +350,11 @@ size_t CustomWakeWord::GetFeedSize() {
     if (multinet_model_data_ == nullptr) {
         return 0;
     }
+#ifdef LANA_WAKE_AFE
+    if (afe_data_ != nullptr) {
+        return afe_iface_->get_feed_chunksize(afe_data_);
+    }
+#endif
     return multinet_->get_samp_chunksize(multinet_model_data_);
 }
 

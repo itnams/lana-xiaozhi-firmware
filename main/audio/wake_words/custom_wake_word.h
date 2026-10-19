@@ -14,6 +14,13 @@
 #include <condition_variable>
 #include <atomic>
 
+#ifdef CONFIG_BOARD_TYPE_LANA_TIM
+#define LANA_WAKE_AFE 1
+#include <esp_afe_sr_models.h>
+#include <freertos/FreeRTOS.h>
+#include <freertos/task.h>
+#endif
+
 #include "audio_codec.h"
 #include "wake_word.h"
 
@@ -64,6 +71,19 @@ private:
 
     void StoreWakeWordData(const std::vector<int16_t>& data);
     void ParseWakenetModelConfig();
+    void DetectChunk(int16_t* chunk);
+
+#ifdef LANA_WAKE_AFE
+    // Lana: AFE front end (WebRTC AGC + VAD, single mic) before MultiNet, run in its own task;
+    // MultiNet is reset only after real silence instead of on a blind timeout.
+    const esp_afe_sr_iface_t* afe_iface_ = nullptr;
+    esp_afe_sr_data_t* afe_data_ = nullptr;
+    std::vector<int16_t> mn_buf_;
+    std::atomic<bool> need_reset_ = true;
+    int silence_ms_ = 0;
+    bool cleaned_in_silence_ = false;
+    void DetectionTask();
+#endif
 };
 
 #endif

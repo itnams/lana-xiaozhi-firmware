@@ -97,7 +97,7 @@ public:
         last_activity_us_ = esp_timer_get_time();
 
         xTaskCreatePinnedToCore([](void* arg) { static_cast<LanaFaceDisplay*>(arg)->RenderLoop(); },
-                                "lana_eyes", 3072, this, 1, &task_, 1);
+                                "lana_eyes", 8192, this, 1, &task_, 1);   // clock mode: localtime_r + snprintf + lv_label
     }
 
     virtual void SetEmotion(const char* emotion) override {
@@ -232,6 +232,8 @@ private:
                 clock_on_ = clock;
                 ApplyClockUi(clock, &tmv);
                 Unlock();
+                ESP_LOGI("LanaFace", "clock %s, eyes stack free %u", clock ? "on" : "off",
+                         (unsigned)uxTaskGetStackHighWaterMark(nullptr));
             } else if (clock && tmv.tm_sec == 0 && Lock(20)) {
                 ApplyClockUi(true, &tmv);   // date roll-over
                 Unlock();

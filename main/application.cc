@@ -970,6 +970,16 @@ void Application::HandleLanaMessage(const cJSON* root) {
             if (device_state_ == kDeviceStateIdle) DismissAlert();
             else display->SetEmotion("neutral");
         });
+    } else if (act == "reboot") {
+        // e.g. to pick up a new OTA offer (the version check runs at boot); only when idle
+        Schedule([this]() {
+            if (device_state_ == kDeviceStateIdle) {
+                ESP_LOGI(TAG, "Reboot requested by server");
+                Reboot();
+            } else {
+                ESP_LOGW(TAG, "Reboot request ignored: device busy (state %d)", (int)device_state_);
+            }
+        });
     } else {
         ESP_LOGW(TAG, "Unknown lana action: %s", act.c_str());
     }

@@ -50,7 +50,17 @@ void Protocol::SendAbortSpeaking(AbortReason reason) {
 
 void Protocol::SendWakeWordDetected(const std::string& wake_word) {
     std::string json = "{\"session_id\":\"" + session_id_ + 
-                      "\",\"type\":\"listen\",\"state\":\"detect\",\"text\":\"" + wake_word + "\"}";
+                      "\",\"type\":\"listen\",\"state\":\"detect\",\"text\":\"" + wake_word + "\"";
+#ifdef CONFIG_BOARD_TYPE_LANA_TIM
+    extern std::string g_lana_wake_detail;   // "<pinyin command>|<prob>" from CustomWakeWord
+    if (!g_lana_wake_detail.empty() && wake_word.rfind("lana_push:", 0) != 0) {
+        auto bar = g_lana_wake_detail.find('|');
+        json += ",\"lana_cmd\":\"" + g_lana_wake_detail.substr(0, bar) + "\"";
+        if (bar != std::string::npos) json += ",\"prob\":" + g_lana_wake_detail.substr(bar + 1);
+        g_lana_wake_detail.clear();
+    }
+#endif
+    json += "}";
     SendText(json);
 }
 

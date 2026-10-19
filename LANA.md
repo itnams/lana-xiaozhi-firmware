@@ -64,3 +64,11 @@ Never commit `.bin` files, `sdkconfig`, Wi-Fi credentials or device tokens.
 - **Idle clock**: after `clock_idle_min` (default 2, 0 = off) minutes idle in standby, the OLED shows 7-segment HH:MM, sleeping eyes and Zzz, plus the Vietnamese date line; renders at 4 fps. Wake word, button, or server push brings the normal face back. Time comes from SNTP pool.ntp.org with TZ ICT-7; for lana-tim the OTA `server_time` is taken as true UTC (no extra offset added).
 - **Wake words (Vietnamese pronunciation)**, threshold 0.15: `hai la na; hei la na; hai lan na; ha lou la na; la na ei; la na wei; la na ai; zhao la na; jiao la na; chao la na; la na la na`.
 - Previews: `tools/eyes_preview.cc` scenarios `clock_idle` and `emotion_alarm`.
+
+## 2.2.1-lana
+- **Easier wake (lana-tim only)**: an AFE front end (single mic, WebRTC AGC +12 dB to -3 dBFS, WebRTC VAD, no NS/AEC/wakenet) now runs before MultiNet in its own task (core 1, prio 5). MultiNet is reset only after >= 600 ms of VAD silence (the 6 s timeout is a fallback), so a phrase can no longer be cut by the old blind 3 s reset. Crash guard: NVS `lana/afe_fail`; two AFE starts that do not survive 20 s fall back to direct MultiNet.
+- **Wake words (20 commands, threshold 0.12)**: `hai la na; hei la na; hai lan na; ha lou la na; ai la na; ei la na; e la na; a la na; la na ei; la na wei; la na ai; la na e; lan na ei; la na ya; la na a; zhao la na; jiao la na; chao la na; xin chao la na; la na la na`.
+- The wake detect message now carries `lana_cmd` (pinyin command) and `prob`; the OTA request carries `lana_reset` (esp_reset_reason) for diagnostics.
+- Clock-mode fix: the `lana_eyes` task stack goes from 3 KB to 8 KB (localtime_r + snprintf + lv_label in clock mode could overflow; suspected cause of reboots/hangs a few minutes after a conversation on 2.2.0). Logs the stack high-water mark when the clock toggles.
+- Server push `{"type":"lana","action":"reboot"}` (only when idle), e.g. to pick up an OTA offer.
+- Wi-Fi config hotspot SSID is `Lana-made-by-Nael` (no suffix); the portal is still http://192.168.4.1.

@@ -15,6 +15,8 @@
 #include <wifi_station.h>
 #include <wifi_configuration_ap.h>
 #include <ssid_manager.h>
+#include <esp_wifi.h>
+#include <cstring>
 #include "afsk_demod.h"
 
 static const char *TAG = "WifiBoard";
@@ -40,13 +42,31 @@ void WifiBoard::EnterWifiConfigMode() {
     wifi_ap.SetLanguage(Lang::CODE);
     wifi_ap.SetSsidPrefix("Xiaozhi");
     wifi_ap.Start();
+#ifdef CONFIG_BOARD_TYPE_LANA_TIM
+    // Lana: fixed hotspot name (no MAC suffix); portal stays at 192.168.4.1
+    static const char kLanaApSsid[] = "Lana-made-by-Nael";
+    {
+        wifi_config_t ap_cfg = {};
+        if (esp_wifi_get_config(WIFI_IF_AP, &ap_cfg) == ESP_OK) {
+            memset(ap_cfg.ap.ssid, 0, sizeof(ap_cfg.ap.ssid));
+            memcpy(ap_cfg.ap.ssid, kLanaApSsid, sizeof(kLanaApSsid) - 1);
+            ap_cfg.ap.ssid_len = sizeof(kLanaApSsid) - 1;
+            esp_err_t err = esp_wifi_set_config(WIFI_IF_AP, &ap_cfg);
+            ESP_LOGI(TAG, "Lana AP SSID -> %s (%s)", kLanaApSsid, esp_err_to_name(err));
+        }
+    }
+#endif
 
     // Wait 1.5 seconds to display board information
     vTaskDelay(pdMS_TO_TICKS(1500));
 
     // Display WiFi configuration AP SSID and web server URL
     std::string hint = Lang::Strings::CONNECT_TO_HOTSPOT;
+#ifdef CONFIG_BOARD_TYPE_LANA_TIM
+    hint += kLanaApSsid;
+#else
     hint += wifi_ap.GetSsid();
+#endif
     hint += Lang::Strings::ACCESS_VIA_BROWSER;
     hint += wifi_ap.GetWebServerUrl();
     
