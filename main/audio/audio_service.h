@@ -1,6 +1,7 @@
 #ifndef AUDIO_SERVICE_H
 #define AUDIO_SERVICE_H
 
+#include <sdkconfig.h>
 #include <memory>
 #include <deque>
 #include <condition_variable>
@@ -38,7 +39,13 @@
 #define OPUS_FRAME_DURATION_MS 60
 #define MAX_ENCODE_TASKS_IN_QUEUE 2
 #define MAX_PLAYBACK_TASKS_IN_QUEUE 2
+#ifdef CONFIG_BOARD_TYPE_LANA_TIM
+// Lana 2.2.3: the server sends 20 ms packets, so 2400/60 = 40 packets was only 0.8 s of audio and a Wi-Fi burst on top
+// of the server's lead overflowed it (overflow is dropped = audible stutter). 120 packets = 2.4 s at 20 ms.
+#define MAX_DECODE_PACKETS_IN_QUEUE 120
+#else
 #define MAX_DECODE_PACKETS_IN_QUEUE (2400 / OPUS_FRAME_DURATION_MS)
+#endif
 #define MAX_SEND_PACKETS_IN_QUEUE (2400 / OPUS_FRAME_DURATION_MS)
 #define AUDIO_TESTING_MAX_DURATION_MS 10000
 #define MAX_TIMESTAMPS_IN_QUEUE 3

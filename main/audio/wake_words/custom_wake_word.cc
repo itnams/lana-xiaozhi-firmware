@@ -192,7 +192,7 @@ bool CustomWakeWord::Initialize(AudioCodec* codec, srmodel_list_t* models_list) 
             cfg->vad_min_noise_ms = 400;
             cfg->agc_init = true;
             cfg->agc_mode = AFE_AGC_MODE_WEBRTC;
-            cfg->agc_compression_gain_db = 12; // INMP441 at 1-3 m is quiet (about -35 dBFS speech)
+            cfg->agc_compression_gain_db = 9;  // 2.2.3: was 12; INMP441 at 1-3 m is quiet, but +12 dB woke on TV/background
             cfg->agc_target_level_dbfs = 3;
             cfg->afe_linear_gain = 1.0f;
             cfg->afe_perferred_core = 1;
