@@ -1,19 +1,20 @@
-// Lana robot face for the 128x64 SSD1306: animated eyes from lana_eyes.h (21 emotions, blinks, saccades,
-// listening/speaking/connecting motion, volume bar) drawn into a 128x48 L8 LVGL image under the stock
-// 16 px status bar, with the subtitle as one scrolling line at the bottom.
+// Lana robot face for the 0.96" SSD1306 128x64 monochrome OLED (2.2.4 redesign).
+// The whole panel is one 128x64 L8 LVGL image composed by lana_ui.h (eyes, status strip, subtitle, idle clock,
+// alarm and Wi-Fi setup screens, Vietnamese bitmap font); the stock OLED layout is hidden. Only the font-awesome
+// icon for non-face emotions (boot chip, errors...) is still an LVGL label drawn over the frame.
 //
-// Threading: a separate low-priority FreeRTOS task (priority 1, ~25 fps) steps + renders the eyes into a
-// scratch buffer WITHOUT holding the LVGL lock, then takes the lock briefly (non-blocking-ish, 20 ms max)
-// to copy the frame and invalidate the image only when it changed. The actual I2C flush happens in the
-// esp_lvgl_port task (also priority 1), so nothing here ever runs on the audio path.
+// Threading: a separate low-priority FreeRTOS task (priority 1, ~25 fps; 4 fps in clock mode) steps + renders the
+// frame into a scratch buffer WITHOUT holding the LVGL lock, then takes the lock briefly (20 ms max) to copy it
+// and invalidate the image only when it changed. The I2C flush runs in the esp_lvgl_port task, never on audio.
 #pragma once
 
 #include "display/oled_display.h"
 #include "assets/lang_config.h"
-#include "lana_eyes.h"
+#include "lana_ui.h"
 #include <font_awesome.h>
 #include <esp_random.h>
 #include <esp_log.h>
+#include <esp_wifi.h>
 #include <freertos/FreeRTOS.h>
 #include <freertos/task.h>
 #include <esp_heap_caps.h>
@@ -30,38 +31,37 @@ LV_FONT_DECLARE(font_awesome_30_1);
 
 class LanaFaceDisplay : public OledDisplay {
 public:
-    static constexpr int kW = lana_eyes::Renderer::W;
-    static constexpr int kH = lana_eyes::Renderer::H;
-    static constexpr int kSubtitleH = 18;
+    static constexpr int kW = lana_ui::W;
+    static constexpr int kH = lana_ui::H;
     static constexpr int kFrameMs = 40;   // 25 fps
     static constexpr int kClockFrameMs = 250;
 
     LanaFaceDisplay(esp_lcd_panel_io_handle_t panel_io, esp_lcd_panel_handle_t panel, int width, int height,
                     bool mirror_x, bool mirror_y)
-        : OledDisplay(panel_io, panel, width, height, mirror_x, mirror_y), eyes_(esp_random()) {
-        if (height != 64 || container_ == nullptr || content_ == nullptr) {
+        : OledDisplay(panel_io, panel, width, height, mirror_x, mirror_y) {
+        if (height != 64 || container_ == nullptr) {
             return;  // stock layout for anything else
         }
+        ui_ = new lana_ui::Ui(esp_random());
         frame_ = (uint8_t*)heap_caps_malloc(kW * kH, MALLOC_CAP_INTERNAL | MALLOC_CAP_8BIT);
         scratch_ = (uint8_t*)heap_caps_malloc(kW * kH, MALLOC_CAP_INTERNAL | MALLOC_CAP_8BIT);
-        if (frame_ == nullptr || scratch_ == nullptr) {
-            ESP_LOGE("LanaFace", "no memory for the eye frame, keeping stock layout");
+        if (ui_ == nullptr || frame_ == nullptr || scratch_ == nullptr) {
+            ESP_LOGE("LanaFace", "no memory for the UI frame, keeping stock layout");
             return;
         }
         memset(frame_, 0xFF, kW * kH);   // 0xFF = pixel off (black = lit on this monochrome port)
 
         DisplayLockGuard lock(this);
-        lv_obj_add_flag(content_, LV_OBJ_FLAG_HIDDEN);  // flex layout skips hidden children
+        lv_obj_add_flag(container_, LV_OBJ_FLAG_HIDDEN);   // stock status bar + chat area: replaced by our frame
 
-        face_ = lv_obj_create(container_);
-        lv_obj_set_width(face_, LV_HOR_RES);
-        lv_obj_set_flex_grow(face_, 1);
+        face_ = lv_obj_create(lv_screen_active());
+        lv_obj_set_size(face_, kW, kH);
+        lv_obj_set_pos(face_, 0, 0);
         lv_obj_set_style_pad_all(face_, 0, 0);
         lv_obj_set_style_border_width(face_, 0, 0);
         lv_obj_set_style_radius(face_, 0, 0);
         lv_obj_set_scrollbar_mode(face_, LV_SCROLLBAR_MODE_OFF);
         lv_obj_remove_flag(face_, LV_OBJ_FLAG_SCROLLABLE);
-        lv_obj_set_style_layout(face_, LV_LAYOUT_NONE, 0);
 
         memset(&dsc_, 0, sizeof(dsc_));
         dsc_.header.magic = LV_IMAGE_HEADER_MAGIC;
@@ -77,27 +77,12 @@ public:
 
         icon_ = lv_label_create(face_);
         lv_obj_set_style_text_font(icon_, &font_awesome_30_1, 0);
-        lv_obj_align(icon_, LV_ALIGN_TOP_MID, 0, 6);
+        lv_obj_align(icon_, LV_ALIGN_CENTER, 0, 6);
         lv_obj_add_flag(icon_, LV_OBJ_FLAG_HIDDEN);
-
-        subtitle_ = lv_label_create(face_);
-        lv_obj_set_width(subtitle_, LV_HOR_RES);
-        lv_label_set_long_mode(subtitle_, LV_LABEL_LONG_SCROLL_CIRCULAR);
-        lv_obj_set_style_text_align(subtitle_, LV_TEXT_ALIGN_CENTER, 0);
-        lv_obj_align(subtitle_, LV_ALIGN_BOTTOM_MID, 0, 0);
-        lv_label_set_text(subtitle_, "");
-        lv_obj_add_flag(subtitle_, LV_OBJ_FLAG_HIDDEN);
-
-        date_ = lv_label_create(face_);   // idle clock: Vietnamese date line under the digits
-        lv_obj_set_width(date_, LV_HOR_RES);
-        lv_obj_set_style_text_align(date_, LV_TEXT_ALIGN_CENTER, 0);
-        lv_obj_align(date_, LV_ALIGN_BOTTOM_MID, 0, 0);
-        lv_label_set_text(date_, "");
-        lv_obj_add_flag(date_, LV_OBJ_FLAG_HIDDEN);
         last_activity_us_ = esp_timer_get_time();
 
         xTaskCreatePinnedToCore([](void* arg) { static_cast<LanaFaceDisplay*>(arg)->RenderLoop(); },
-                                "lana_eyes", 8192, this, 1, &task_, 1);   // clock mode: localtime_r + snprintf + lv_label
+                                "lana_eyes", 8192, this, 1, &task_, 1);
     }
 
     virtual void SetEmotion(const char* emotion) override {
@@ -109,24 +94,24 @@ public:
         if (e != lana_eyes::kNeutral) Touch();
         if (e >= 0) {
             {
-                std::lock_guard<std::mutex> g(eyes_mutex_);
-                eyes_.SetEmotion(e);
+                std::lock_guard<std::mutex> g(mutex_);
+                ui_->eyes().SetEmotion(e);
                 show_icon_ = false;
+                alarm_ = (e == lana_eyes::kAlarm);
             }
             DisplayLockGuard lock(this);
             lv_obj_add_flag(icon_, LV_OBJ_FLAG_HIDDEN);
-            lv_obj_remove_flag(image_, LV_OBJ_FLAG_HIDDEN);
         } else {
-            // not a face (boot chip, wifi/link/error icons...): show the font-awesome icon instead of the eyes
+            // not a face (boot chip, wifi/link/error icons...): font-awesome icon over the frame, strip keeps the text
             const char* utf8 = font_awesome_get_utf8(emotion ? emotion : "");
             {
-                std::lock_guard<std::mutex> g(eyes_mutex_);
+                std::lock_guard<std::mutex> g(mutex_);
                 show_icon_ = true;
+                alarm_ = false;
             }
             DisplayLockGuard lock(this);
             lv_label_set_text(icon_, utf8 ? utf8 : FONT_AWESOME_MICROCHIP_AI);
             lv_obj_remove_flag(icon_, LV_OBJ_FLAG_HIDDEN);
-            lv_obj_add_flag(image_, LV_OBJ_FLAG_HIDDEN);
         }
     }
 
@@ -144,11 +129,25 @@ public:
         bool is_clock = strlen(status) == 5 && status[2] == ':' && isdigit((unsigned char)status[0]) && isdigit((unsigned char)status[4]);
         if (is_clock) return;
         {
-            std::lock_guard<std::mutex> g(eyes_mutex_);
-            eyes_.SetState(s);
+            std::lock_guard<std::mutex> g(mutex_);
+            ui_->eyes().SetState(s);
+            model_.state = s;
             idle_ = (s == lana_eyes::kStateIdle && strcmp(status, Lang::Strings::STANDBY) == 0);
+            model_.status = idle_ ? std::string() : Ellipsis(status);
+            if (strcmp(status, Lang::Strings::WIFI_CONFIG_MODE) == 0) wifi_setup_ = true;
         }
         if (last_status_ != status) { last_status_ = status; Touch(); }
+    }
+
+    virtual void ShowNotification(const char* notification, int duration_ms = 3000) override {
+        if (face_ == nullptr) { OledDisplay::ShowNotification(notification, duration_ms); return; }
+        std::lock_guard<std::mutex> g(mutex_);
+        notif_ = notification ? Ellipsis(notification) : std::string();
+        notif_until_us_ = esp_timer_get_time() + (int64_t)duration_ms * 1000;
+        last_activity_us_ = esp_timer_get_time();
+    }
+    virtual void ShowNotification(const std::string& notification, int duration_ms = 3000) override {
+        ShowNotification(notification.c_str(), duration_ms);
     }
 
     virtual void SetChatMessage(const char* role, const char* content) override {
@@ -159,26 +158,25 @@ public:
         std::string s = content ? content : "";
         std::replace(s.begin(), s.end(), '\n', ' ');
         if (!s.empty()) Touch();
-        {
-            std::lock_guard<std::mutex> g(eyes_mutex_);
-            eyes_.SetReservedBottom(s.empty() ? 0 : kSubtitleH);
+        std::lock_guard<std::mutex> g(mutex_);
+        // Wi-Fi setup hint: "<CONNECT_TO_HOTSPOT><ssid><ACCESS_VIA_BROWSER><url>" -> dedicated setup screen
+        const std::string hot = Lang::Strings::CONNECT_TO_HOTSPOT, via = Lang::Strings::ACCESS_VIA_BROWSER;
+        size_t a = s.find(hot), b = s.find(via);
+        if (a != std::string::npos && b != std::string::npos && b > a) {
+            model_.ssid = s.substr(a + hot.size(), b - a - hot.size());
+            model_.url = s.substr(b + via.size());
+            wifi_setup_ = true;
+            return;
         }
-        DisplayLockGuard lock(this);
-        subtitle_text_empty_ = s.empty();
-        if (s.empty()) {
-            lv_obj_add_flag(subtitle_, LV_OBJ_FLAG_HIDDEN);
-        } else {
-            lv_label_set_text(subtitle_, s.c_str());
-            lv_obj_remove_flag(subtitle_, LV_OBJ_FLAG_HIDDEN);
-        }
+        if (s != model_.subtitle) { model_.subtitle = s; ui_->ResetScroll(); }
     }
 
-    // Volume buttons: bar drawn under the eyes for 1.5 s (the status bar shows the text notification)
+    // Volume buttons: bar drawn under the eyes for 1.5 s (the strip shows the text notification)
     void ShowVolume(int volume) {
         if (face_ == nullptr) return;
         Touch();
-        std::lock_guard<std::mutex> g(eyes_mutex_);
-        eyes_.ShowVolume(volume, 1500);
+        std::lock_guard<std::mutex> g(mutex_);
+        ui_->eyes().ShowVolume(volume, 1500);
     }
 
     // Idle clock after this many minutes of standby without activity (0 = never)
@@ -187,88 +185,85 @@ public:
     void Touch() { last_activity_us_ = esp_timer_get_time(); }
 
 private:
-    static bool TimeValid(struct tm& tmv) {
-        time_t now = time(nullptr);
-        localtime_r(&now, &tmv);
-        return tmv.tm_year + 1900 >= 2025;
+    static std::string Ellipsis(const char* s) {   // "Đang nói..." -> "Đang nói…" (narrower, one glyph)
+        std::string r = s;
+        size_t p;
+        while ((p = r.find("...")) != std::string::npos) r.replace(p, 3, "…");
+        return r;
     }
 
-    bool WantClock(struct tm& tmv) {
-        if (!idle_ || idle_clock_min_ <= 0 || show_icon_) return false;
-        if (esp_timer_get_time() - last_activity_us_ < (int64_t)idle_clock_min_ * 60 * 1000000) return false;
-        return TimeValid(tmv);
-    }
-
-    // Show / hide the LVGL date label and the subtitle while in clock mode (lock held by caller)
-    void ApplyClockUi(bool on, const struct tm* tmv) {
-        if (on) {
-            static const char* const kDays[7] = {"Chủ Nhật", "Thứ Hai", "Thứ Ba", "Thứ Tư", "Thứ Năm", "Thứ Sáu", "Thứ Bảy"};
-            char buf[48];
-            snprintf(buf, sizeof(buf), "%s, %02d/%02d/%04d", kDays[tmv->tm_wday % 7], tmv->tm_mday, tmv->tm_mon + 1, tmv->tm_year + 1900);
-            if (date_text_ != buf) { date_text_ = buf; lv_label_set_text(date_, buf); }
-            lv_obj_remove_flag(date_, LV_OBJ_FLAG_HIDDEN);
-            lv_obj_add_flag(subtitle_, LV_OBJ_FLAG_HIDDEN);
-        } else {
-            lv_obj_add_flag(date_, LV_OBJ_FLAG_HIDDEN);
-            if (!subtitle_text_empty_) lv_obj_remove_flag(subtitle_, LV_OBJ_FLAG_HIDDEN);
-        }
+    bool WantClock(const struct tm& tmv) {
+        if (!idle_ || idle_clock_min_ <= 0 || show_icon_ || alarm_) return false;
+        if (tmv.tm_year + 1900 < 2025) return false;
+        return esp_timer_get_time() - last_activity_us_ >= (int64_t)idle_clock_min_ * 60 * 1000000;
     }
 
     void RenderLoop() {
         TickType_t last = xTaskGetTickCount();
+        int64_t next_rssi_us = 0;
         while (true) {
-            bool icon;
+            int64_t now_us = esp_timer_get_time();
+            if (now_us >= next_rssi_us) {   // Wi-Fi bars: poll the AP info every 5 s (cheap, no lock)
+                next_rssi_us = now_us + 5000000;
+                wifi_ap_record_t ap = {};
+                rssi_ = (esp_wifi_sta_get_ap_info(&ap) == ESP_OK) ? ap.rssi : 0;
+            }
+            time_t now = time(nullptr);
             struct tm tmv;
+            localtime_r(&now, &tmv);
             bool clock = WantClock(tmv);
             int frame_ms = clock ? kClockFrameMs : kFrameMs;    // 4 fps in clock mode: low CPU
             {
-                std::lock_guard<std::mutex> g(eyes_mutex_);
-                eyes_.Step(frame_ms);
-                icon = show_icon_;
-                if (clock) eyes_.RenderClock(scratch_, tmv.tm_hour, tmv.tm_min, tmv.tm_sec, kH - kSubtitleH);
-                else if (!icon) eyes_.Render(scratch_);
+                std::lock_guard<std::mutex> g(mutex_);
+                lana_ui::Model m = model_;
+                m.rssi = rssi_;
+                m.hh = tmv.tm_hour; m.mm = tmv.tm_min; m.ss = tmv.tm_sec;
+                m.wday = tmv.tm_wday; m.mday = tmv.tm_mday; m.mon = tmv.tm_mon + 1;
+                if (!notif_.empty() && now_us < notif_until_us_) m.status = notif_;
+                if (wifi_setup_) m.screen = lana_ui::kScreenWifiSetup;
+                else if (alarm_) m.screen = lana_ui::kScreenAlarm;
+                else if (clock) m.screen = lana_ui::kScreenClock;
+                else if (show_icon_) m.screen = lana_ui::kScreenIcon;
+                else m.screen = lana_ui::kScreenFace;
+                ui_->Step(frame_ms);
+                ui_->Render(m, scratch_);
             }
-            if (clock != clock_on_ && Lock(50)) {
+            if (clock != clock_on_) {
                 clock_on_ = clock;
-                ApplyClockUi(clock, &tmv);
-                Unlock();
                 ESP_LOGI("LanaFace", "clock %s, eyes stack free %u", clock ? "on" : "off",
                          (unsigned)uxTaskGetStackHighWaterMark(nullptr));
-            } else if (clock && tmv.tm_sec == 0 && Lock(20)) {
-                ApplyClockUi(true, &tmv);   // date roll-over
-                Unlock();
             }
-            if (!icon) {
-                // 1 = lit -> L8 0x00 (black = lit pixel), 0 -> 0xFF
-                for (int i = 0; i < kW * kH; i++) scratch_[i] = scratch_[i] ? 0x00 : 0xFF;
-                if (memcmp(scratch_, frame_, kW * kH) != 0 && Lock(20)) {
-                    memcpy(frame_, scratch_, kW * kH);
-                    lv_image_cache_drop(&dsc_);
-                    lv_obj_invalidate(image_);
-                    Unlock();
-                }
+            // 1 = lit -> L8 0x00 (black = lit pixel), 0 -> 0xFF
+            for (int i = 0; i < kW * kH; i++) scratch_[i] = scratch_[i] ? 0x00 : 0xFF;
+            if (memcmp(scratch_, frame_, kW * kH) != 0 && Lock(20)) {
+                memcpy(frame_, scratch_, kW * kH);
+                lv_image_cache_drop(&dsc_);
+                lv_obj_invalidate(image_);
+                Unlock();
             }
             vTaskDelayUntil(&last, pdMS_TO_TICKS(frame_ms));
         }
     }
 
-    lana_eyes::Renderer eyes_;
-    std::mutex eyes_mutex_;
+    lana_ui::Ui* ui_ = nullptr;
+    lana_ui::Model model_;
+    std::mutex mutex_;
     bool show_icon_ = false;
+    bool alarm_ = false;
+    bool wifi_setup_ = false;
+    std::string notif_;
+    int64_t notif_until_us_ = 0;
+    volatile int rssi_ = 0;
     uint8_t* frame_ = nullptr;
     uint8_t* scratch_ = nullptr;
     lv_image_dsc_t dsc_;
     lv_obj_t* face_ = nullptr;
     lv_obj_t* image_ = nullptr;
     lv_obj_t* icon_ = nullptr;
-    lv_obj_t* subtitle_ = nullptr;
     TaskHandle_t task_ = nullptr;
-    lv_obj_t* date_ = nullptr;
-    std::string date_text_;
     volatile bool idle_ = false;
     volatile bool clock_on_ = false;
     volatile int idle_clock_min_ = 2;
     volatile int64_t last_activity_us_ = 0;
-    bool subtitle_text_empty_ = true;
     std::string last_status_;
 };

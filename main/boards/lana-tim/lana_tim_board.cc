@@ -289,6 +289,13 @@ public:
         InitializeTools();
     }
 
+    // 2.2.4: the app turns modem sleep on whenever the audio channel closes; Lana is mains powered and needs a
+    // responsive radio for pushes / low-latency UDP, so every request is mapped to WIFI_PS_NONE.
+    virtual void SetPowerSaveMode(bool enabled) override {
+        (void)enabled;
+        WifiBoard::SetPowerSaveMode(false);
+    }
+
     virtual Led* GetLed() override {
         static SingleLed led(BUILTIN_LED_GPIO);
         return &led;

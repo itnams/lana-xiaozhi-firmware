@@ -82,3 +82,25 @@ Never commit `.bin` files, `sdkconfig`, Wi-Fi credentials or device tokens.
 - **Long replies no longer overflow the audio queue (lana-tim only)**: the server sends 20 ms Opus packets, so the stock limit of 2400/60 = 40 packets meant only 0.8 s of audio. With the server's 0.6 s lead plus Wi-Fi bursts, the queue overflowed and the extra packets were silently dropped, which is the stutter heard in long answers. The limit is now 120 packets (2.4 s); the server uses a bigger cushion (1.5 s lead, 600 ms prebuffer) only for 2.2.3 or newer (`fw_big_queue_min`).
 - **Hang recovery**: `CONFIG_ESP_TASK_WDT_PANIC=y`. A task that starves the CPU or deadlocks now panics and reboots after 10 s (reset reason TASK_WDT, reported to the server as `lana_reset`) instead of freezing until someone power-cycles the robot.
 - **Harder to wake from TV/background noise**: threshold 0.12 -> 0.15. The false-prone vowel-onset phrases `ai la na`, `e la na` and `a la na` are dropped (every logged wake with no speech afterwards came from them). Pre-wake AGC gain goes from +12 to +9 dB. The remaining 17 phrases are: `hai la na; hei la na; hai lan na; ha lou la na; ei la na; la na ei; la na wei; la na ai; la na e; lan na ei; la na ya; la na a; zhao la na; jiao la na; chao la na; xin chao la na; la na la na`.
+
+## 2.2.4-lana — Wi-Fi power save off + 0.96" OLED UI redesign
+
+**Wi-Fi.** The stock app sets `WIFI_PS_MIN_MODEM` at boot (IDF default) and again every time the audio channel
+closes, so while idle the radio only wakes on DTIM beacons (LAN ping ~120 ms, bursty UDP, late pushes). lana-tim now
+maps every `SetPowerSaveMode()` call to `WIFI_PS_NONE` and forces it right after the station connects
+(`wifi_board.cc`, guarded by `CONFIG_BOARD_TYPE_LANA_TIM`). The boot log prints
+`Lana Wi-Fi: rssi <dBm>, channel <n>, power save off`. The server logs `rssi=/ch=` from the OTA body.
+
+**Display: SSD1306 128x64 monochrome, I2C SDA41/SCL42** (`CONFIG_OLED_SSD1306_128X64`). The whole panel is now one
+128x64 frame composed by `lana_ui.h` (plain C++, no LVGL); the stock top bar and chat area are hidden.
+- Face: the eyes fill all 64 rows when idle (about 1.3x the 2.2.3 size). A 13 px status strip (mic / speaker / dots icon,
+  short Vietnamese text, Wi-Fi bars) appears only while listening / speaking / connecting or for a notification.
+  The subtitle is one 13 px line that scrolls when it is long.
+- Idle clock: 38 px 7-segment HH:MM, blinking colon, short date `T7 · 25/10`, 1 px burn-in drift per minute, 4 fps.
+- Alarm: flashing inverted header (bell, `Báo thức`, HH:MM), trembling alarm eyes, reminder text below.
+- Wi-Fi setup: steps with the hotspot `Lana-made-by-Nael` and `192.168.4.1` (bold), parsed from the stock hint.
+- Font: `lana_font_vi.h`, 245 glyphs in a 13 px cell (ASCII + all Vietnamese letters). The base glyphs come from
+  DejaVu Sans 10 rasterised 1-bit, and the tone/vowel marks are hand-drawn pixel art composed via NFD
+  (`tools/gen_vi_font.py`), because outline fonts lose the marks at this size.
+- Previews: `g++ -O2 -std=c++17 -I main/boards/lana-tim tools/eyes_preview.cc -o /tmp/eyes_preview && /tmp/eyes_preview RAW`
+  then `tools/ui_preview.py RAW OUT` (1x/4x PNG + GIF, contact_sheet.png).

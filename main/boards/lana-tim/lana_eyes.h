@@ -88,7 +88,7 @@ inline const Face& FaceFor(int e) {
 class Renderer {
 public:
     static constexpr int W = 128;
-    static constexpr int H = 48;        // eye area (below the 16 px status bar)
+    static constexpr int H = 64;        // full 128x64 panel; the UI composer reserves strips via SetReservedBottom
 
     explicit Renderer(uint32_t seed = 12345) : rng_(seed ? seed : 1) {
         cur_[0] = cur_[1] = FaceFor(kNeutral).l;
@@ -103,7 +103,8 @@ public:
     int emotion() const { return emotion_; }
     void SetState(State s) { if (s != state_) { state_ = s; state_ms_ = 0; } }
     // Leave room at the bottom for a subtitle line (eyes squeeze into the top part)
-    void SetReservedBottom(int px) { reserved_bottom_ = px < 0 ? 0 : (px > 24 ? 24 : px); }
+    void SetReservedBottom(int px) { reserved_bottom_ = px < 0 ? 0 : (px > 40 ? 40 : px); }
+    void SetDrawBell(bool on) { draw_bell_ = on; }
     void ShowVolume(int volume, int duration_ms = 1500) { volume_ = volume; volume_ms_ = duration_ms; }
 
     // Advance time by dt milliseconds
@@ -181,7 +182,10 @@ public:
         memset(px, 0, W * H);
         const Face& f = FaceFor(emotion_);
         int area_h = H - reserved_bottom_;
-        float vscale = area_h / 40.0f; if (vscale > 1.0f) vscale = 1.0f;
+        // 2.2.4: eyes grow to fill the free area (full 64 rows -> ~1.3x the 2.2.3 size), shrink with strips
+        float vscale = area_h / 46.0f; if (vscale > 1.32f) vscale = 1.32f; if (vscale < 0.6f) vscale = 0.6f;
+        float hscale = vscale > 1.0f ? 1.0f + (vscale - 1.0f) * 0.75f : 1.0f;
+        float sep = 30.0f + (vscale > 1.0f ? (vscale - 1.0f) * 12.0f : 0.0f);
         float cy = area_h * 0.5f;
         float t = t_ / 1000.0f;
 
@@ -195,23 +199,23 @@ public:
         for (int i = 0; i < 2; i++) {
             EyeShape e = cur_[i];
             float wob = (f.anim & kAnimWobble) ? 1.5f * std::sin(t * 6.0f + i * 3.14159f) : 0;
-            float ex = (i == 0 ? 64 - 30 : 64 + 30) + e.dx + gaze_x_ + shake;
+            float ex = (i == 0 ? 64 - sep : 64 + sep) + e.dx + gaze_x_ + shake;
             float ey = cy + (e.dy + gaze_y_ + bob + wob) * vscale;
             float h = e.h * vscale;
-            float w = e.w;
+            float w = e.w * hscale;
             bool wink = (f.anim & kAnimWinkR) && i == 1;
             if (f.anim & kAnimHearts) {
                 float s = 1.0f + 0.12f * std::sin(t * 2 * 3.14159f * 1.6f);
-                DrawHeart(px, ex, ey, 15.0f * s * (vscale < 0.8f ? 0.8f : vscale), area_h);
+                DrawHeart(px, ex, ey, 15.0f * s * (vscale < 0.8f ? 0.8f : vscale > 1.15f ? 1.15f : vscale), area_h);
                 continue;
             }
             if (wink) { DrawArc(px, ex, ey + 2, w * 0.5f, 5, area_h); continue; }
             float hh = h * blink;
             if (hh < 2.5f) { DrawHLine(px, ex - w / 2 + 2, ex + w / 2 - 2, ey, area_h); DrawHLine(px, ex - w / 2 + 3, ex + w / 2 - 3, ey + 1, area_h); continue; }
-            DrawEye(px, ex, ey, w, hh, e.r * (hh < h ? hh / h : 1.0f), i == 0 ? e.lid_out : e.lid_in,
+            DrawEye(px, ex, ey, w, hh, e.r * vscale * (hh < h ? hh / h : 1.0f), i == 0 ? e.lid_out : e.lid_in,
                     i == 0 ? e.lid_in : e.lid_out, e.smile, area_h);
             if (f.anim & kAnimGlasses) {
-                if (i == 0) for (int x = (int)(ex + w / 2); x <= (int)(64 + 30 - w / 2 + gaze_x_); x++) { Set(px, x, (int)(ey - h / 2 + 2), area_h); Set(px, x, (int)(ey - h / 2 + 3), area_h); }
+                if (i == 0) for (int x = (int)(ex + w / 2); x <= (int)(64 + sep - w / 2 + gaze_x_); x++) { Set(px, x, (int)(ey - h / 2 + 2), area_h); Set(px, x, (int)(ey - h / 2 + 3), area_h); }
                 int g = (int)(t_ / 30) % 90 - 20;   // sweeping glint
                 for (int d = 0; d < 3; d++)
                     for (int y = 0; y < (int)h; y++) Clear(px, (int)(ex - w / 2 + g + d - y / 2), (int)(ey - h / 2 + y), area_h);
@@ -231,7 +235,7 @@ public:
             }
         }
         if (f.anim & kAnimZzz) DrawZzz(px, area_h);
-        if (f.anim & kAnimBell) DrawBell(px, 64 + ((((t_ / 90) % 2) ? 2 : -2)), 9, (t_ / 180) % 2 == 0, area_h);
+        if ((f.anim & kAnimBell) && draw_bell_) DrawBell(px, 64 + ((((t_ / 90) % 2) ? 2 : -2)), 9, (t_ / 180) % 2 == 0, area_h);
         if (f.anim & kAnimDots) {
             int n = (int)(t_ / 450) % 4;
             for (int k = 0; k < n; k++) FillCircle(px, 100 + k * 7, 8 - k * 1.5f, 1.6f + k * 0.4f, area_h);
@@ -240,7 +244,7 @@ public:
             float ph = std::fmod(t * 0.6f, 1.0f);
             DrawHeart(px, 98 + 8 * ph, area_h - 8 - ph * (area_h - 14), 5.5f, area_h);
         }
-        if (volume_ms_ > 0) DrawVolume(px);
+        if (volume_ms_ > 0) DrawVolume(px, area_h);
     }
 
     // Idle clock: big HH:MM on the left (rows 0..clock_h), a small sleeping face with drifting Zzz on the right.
@@ -293,6 +297,7 @@ private:
     float syll_amp_ = 0, talk_phase_ = 0;
     int syll_ms_ = 0;
     int reserved_bottom_ = 0;
+    bool draw_bell_ = true;
     int volume_ = 0, volume_ms_ = 0;
     EyeShape cur_[2];
 
@@ -418,9 +423,8 @@ private:
         if (ring) for (int k = 0; k < 3; k++) { Set(px, cx - 9 - k, cy - 3 + k * 3, area_h); Set(px, cx + 9 + k, cy - 3 + k * 3, area_h); }
     }
 
-    void DrawVolume(uint8_t* px) const {
-        int area_h = H;
-        int x0 = 14, x1 = 114, y0 = H - 9, y1 = H - 3;
+    void DrawVolume(uint8_t* px, int area_h) const {
+        int x0 = 14, x1 = 114, y0 = area_h - 9, y1 = area_h - 3;
         for (int y = y0 - 1; y <= y1 + 1; y++) for (int x = x0 - 2; x <= x1 + 2; x++) Clear(px, x, y, area_h);
         for (int x = x0; x <= x1; x++) { Set(px, x, y0, area_h); Set(px, x, y1, area_h); }
         for (int y = y0; y <= y1; y++) { Set(px, x0, y, area_h); Set(px, x1, y, area_h); }

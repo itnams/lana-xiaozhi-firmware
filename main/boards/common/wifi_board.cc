@@ -133,6 +133,17 @@ void WifiBoard::StartNetwork() {
         EnterWifiConfigMode();
         return;
     }
+#ifdef CONFIG_BOARD_TYPE_LANA_TIM
+    // Lana 2.2.4: Wi-Fi modem sleep off for good (mains powered). With WIFI_PS_MIN_MODEM the radio only wakes on
+    // DTIM beacons -> ~120 ms LAN ping, bursty UDP audio and late server pushes. The setting survives reconnects.
+    SetPowerSaveMode(false);
+    {
+        wifi_ps_type_t ps = WIFI_PS_MIN_MODEM;
+        esp_wifi_get_ps(&ps);
+        ESP_LOGI(TAG, "Lana Wi-Fi: rssi %d dBm, channel %d, power save %s", wifi_station.GetRssi(),
+                 wifi_station.GetChannel(), ps == WIFI_PS_NONE ? "off" : "ON");
+    }
+#endif
 }
 
 NetworkInterface* WifiBoard::GetNetwork() {
