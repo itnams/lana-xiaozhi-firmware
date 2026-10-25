@@ -291,6 +291,7 @@ private:
         uint8_t m = seg[d < 0 || d > 9 ? 8 : d];
         float r = th / 2, g = r + 1.2f;                       // capsule radius, gap at the joints
         float L = x + r, R = x + w - r, T = y + r, B = y + h - r, M = y + h / 2.0f;
+        if (d == 1) R = x + w * 0.62f;   // centre-ish the 1 so '21:48' has no hole
         if (m & 0x01) Capsule(c, L + g, T, R - g, T, r);
         if (m & 0x40) Capsule(c, L + g, M, R - g, M, r);
         if (m & 0x08) Capsule(c, L + g, B, R - g, B, r);
@@ -334,7 +335,7 @@ private:
 public:
     void SetClockStyle(int s) { clock_style_ = s; }
 private:
-    int clock_style_ = 0;
+    int clock_style_ = 1;   // B: clock + dozing face (chosen Oct 25)
 
     void RenderClock(Canvas& c, const Model& m) {
         // burn-in care: the whole screen drifts by 1 px in a 4-minute cycle

@@ -9,7 +9,7 @@ using namespace lana_ui;
 
 static std::string g_dir;
 
-static int g_style = 0;
+static int g_style = 1;
 static void run(const std::string& name, Model m, int emotion, int ms, int step_ms = 40, int volume = -1) {
     Ui ui(777); ui.SetClockStyle(g_style);
     ui.eyes().SetState(kStateIdle);
@@ -65,6 +65,6 @@ int main(int argc, char** argv) {
         { Model m = idle; m.screen = kScreenClock; m.hh = 21; m.mm = 48; m.ss = 30; m.wday = 6; m.mday = 31; m.mon = 10; run(p + "nowx", m, kSleepy, 1000, 240); }
         { Model m = idle; m.screen = kScreenClock; m.hh = 10; m.mm = 10; m.battery = 76; m.temp = 33; m.wx = 1; m.wday = 2; m.mday = 27; m.mon = 10; run(p + "battery", m, kSleepy, 1000, 240); }
     }
-    g_style = 0;
+    g_style = 1;
     return 0;
 }

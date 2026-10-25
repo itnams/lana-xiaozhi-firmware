@@ -134,5 +134,5 @@ maps every `SetPowerSaveMode()` call to `WIFI_PS_NONE` and forces it right after
 - While speaking the mouth opens/closes with the syllable envelope (open smile, open frown for sad, round O for surprised).
 - `Renderer::SetMouth(false)` restores eyes-only. Previews: `tools/eyes_preview.cc` scenarios `face_*`, `talk_*`.
 - Idle clock redesigned: rounded capsule 7-segment digits, round blinking colon, dotted separator, info row
-  (date left, weather icon + temp / battery right). `Ui::SetClockStyle(0|1|2)`: A default, B clock + dozing face,
+  (date left, weather icon + temp / battery right). `Ui::SetClockStyle(0|1|2)`: B default (clock + dozing face), A big clock,
   C clock + seconds bar. Previews: `idleA_*`, `idleB_*`, `idleC_*`.
