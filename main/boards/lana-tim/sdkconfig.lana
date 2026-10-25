@@ -29,3 +29,27 @@ CONFIG_ESP_CONSOLE_UART_DEFAULT=n
 
 # 2.2.3: a starved/stuck task reboots the robot (reset reason TASK_WDT, reported as lana_reset) instead of hanging until power-cycled
 CONFIG_ESP_TASK_WDT_PANIC=y
+
+# --- Trim: Lana UI only uses lv_obj + label + image + flex (mono 128x64). Keep default theme & 16-bit
+#     colour (esp_lvgl_port SSD1306 mono path converts from RGB565).
+CONFIG_LV_USE_ARC=n
+CONFIG_LV_USE_BAR=n
+CONFIG_LV_USE_BUTTON=n
+CONFIG_LV_USE_BUTTONMATRIX=n
+CONFIG_LV_USE_CANVAS=n
+CONFIG_LV_USE_CHECKBOX=n
+CONFIG_LV_USE_DROPDOWN=n
+CONFIG_LV_USE_IMAGEBUTTON=n
+CONFIG_LV_USE_LINE=n
+CONFIG_LV_USE_ROLLER=n
+CONFIG_LV_USE_SCALE=n
+CONFIG_LV_USE_SLIDER=n
+CONFIG_LV_USE_SWITCH=n
+CONFIG_LV_USE_TEXTAREA=n
+CONFIG_LV_USE_TABLE=n
+CONFIG_LV_USE_THEME_SIMPLE=n
+CONFIG_LV_USE_GRID=n
+CONFIG_LV_USE_LODEPNG=n
+CONFIG_LV_USE_SNAPSHOT=n
+# CONFIG_LV_USE_IMGFONT kept: xiaozhi-fonts emoji fonts call lv_imgfont_create
+CONFIG_LV_USE_OBSERVER=n

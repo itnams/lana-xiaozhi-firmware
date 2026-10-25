@@ -565,6 +565,13 @@ file(GLOB BOARD_SOURCES
 )
 list(APPEND SOURCES ${BOARD_SOURCES})
 
+# Lana (lana-tim, Wi-Fi + 128x64 mono OLED, no camera / 4G / LCD): drop the generic parts it never uses
+if(CONFIG_BOARD_TYPE_LANA_TIM)
+    list(FILTER SOURCES EXCLUDE REGEX "boards/common/(ml307_board|dual_network_board|esp32_camera)\\.cc$")
+    list(FILTER SOURCES EXCLUDE REGEX "display/(lcd_display|emote_display)\\.cc$")
+    list(FILTER SOURCES EXCLUDE REGEX "display/lvgl_display/jpg/")
+endif()
+
 # Select audio processor according to Kconfig
 if(CONFIG_USE_AUDIO_PROCESSOR)
     list(APPEND SOURCES "audio/processors/afe_audio_processor.cc")

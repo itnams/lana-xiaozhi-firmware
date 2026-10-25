@@ -256,11 +256,14 @@ bool Assets::Apply() {
     cJSON* hide_subtitle = cJSON_GetObjectItem(root, "hide_subtitle");
     if (cJSON_IsBool(hide_subtitle)) {
         bool hide = cJSON_IsTrue(hide_subtitle);
+        (void)hide;
+#ifndef CONFIG_BOARD_TYPE_LANA_TIM  // lana-tim has no LcdDisplay
         auto lcd_display = dynamic_cast<LcdDisplay*>(display);
         if (lcd_display != nullptr) {
             lcd_display->SetHideSubtitle(hide);
             ESP_LOGI(TAG, "Set hide_subtitle to %s", hide ? "true" : "false");
         }
+#endif
     }
 
 #elif defined(CONFIG_USE_EMOTE_MESSAGE_STYLE)

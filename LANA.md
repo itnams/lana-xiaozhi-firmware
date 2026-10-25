@@ -112,3 +112,9 @@ maps every `SetPowerSaveMode()` call to `WIFI_PS_NONE` and forces it right after
 - Battery: status-strip icon + %, clock corner %, blinking low-battery icon <15 %. Hidden: this robot has no battery
   sense. To enable, fit a 100k/100k divider BAT+ -> GPIO1 (ADC1_CH0) -> GND (+100 nF), optional TP4056 CHRG -> GPIO2,
   then uncomment LANA_BATTERY_ADC_GPIO / LANA_BATTERY_CHARGE_GPIO in config.h. The level is also sent in the OTA board JSON.
+
+## 2.2.4-lana trim (Oct 25)
+- lana-tim build drops ml307/dual-network boards, ESP32 camera, LCD/emote displays and JPEG encoder sources
+  (main/CMakeLists.txt filter) and unused LVGL widgets/decoders (sdkconfig.lana). Kept: label, image, flex,
+  default theme, imgfont (xiaozhi-fonts emoji), 16-bit colour (esp_lvgl_port SSD1306 mono path).
+- App 2,619,072 -> 2,439,104 B (-176 KB); DIRAM used 155,759 -> 145,347 B (+10.4 KB free).
