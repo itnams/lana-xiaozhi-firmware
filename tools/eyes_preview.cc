@@ -49,5 +49,11 @@ int main(int argc, char** argv) {
     { Model m = idle; m.screen = kScreenClock; m.hh = 21; m.mm = 7; m.ss = 56; m.wday = 6; m.mday = 25; m.mon = 10; run("clock_idle", m, kSleepy, 8000, 240); }
     { Model m = idle; m.screen = kScreenAlarm; m.hh = 6; m.mm = 30; m.subtitle = "Dậy đi ba ơi, 6 giờ 30 rồi!"; run("alarm", m, kAlarm, 4000); }
     { Model m; m.screen = kScreenWifiSetup; m.ssid = "Lana-made-by-Nael"; m.url = "http://192.168.4.1"; m.status = "Chế độ cấu hình Wi-Fi"; run("wifi_setup", m, kNeutral, 3200); }
+    { Model m = idle; m.screen = kScreenClock; m.hh = 14; m.mm = 30; m.ss = 0; m.wday = 0; m.mday = 25; m.mon = 10; m.temp = 33; m.wx = 1; run("clock_wx_sun", m, kSleepy, 1000, 240); }
+    { Model m = idle; m.screen = kScreenClock; m.hh = 14; m.mm = 31; m.ss = 0; m.wday = 0; m.mday = 25; m.mon = 10; m.temp = 31; m.wx = 2; run("clock_wx_partly", m, kSleepy, 1000, 240); }
+    { Model m = idle; m.screen = kScreenClock; m.hh = 14; m.mm = 32; m.ss = 0; m.wday = 0; m.mday = 25; m.mon = 10; m.temp = 29; m.wx = 3; run("clock_wx_cloud", m, kSleepy, 1000, 240); }
+    { Model m = idle; m.screen = kScreenClock; m.hh = 14; m.mm = 33; m.ss = 0; m.wday = 0; m.mday = 25; m.mon = 10; m.temp = 27; m.wx = 4; run("clock_wx_rain", m, kSleepy, 1000, 240); }
+    { Model m = idle; m.screen = kScreenClock; m.hh = 14; m.mm = 34; m.ss = 0; m.wday = 0; m.mday = 25; m.mon = 10; m.temp = -5; m.wx = 5; run("clock_wx_storm", m, kSleepy, 1000, 240); }
+    { Model m = idle; m.screen = kScreenClock; m.hh = 9; m.mm = 5; m.battery = 76; m.temp = 30; m.wx = 4; run("clock_wx_battery", m, kSleepy, 1000, 240); }
     return 0;
 }

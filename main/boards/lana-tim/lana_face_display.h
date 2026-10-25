@@ -173,6 +173,12 @@ public:
     }
 
     virtual void LanaShowVolume(int volume) override { ShowVolume(volume); }
+    // Weather pushed by the server about every 15 min; hidden again when older than 2 h
+    virtual void LanaSetWeather(int temp_c, int icon) override {
+        std::lock_guard<std::mutex> g(mutex_);
+        model_.temp = temp_c; model_.wx = icon;
+        weather_us_ = esp_timer_get_time();
+    }
 
     // Volume buttons: bar drawn under the eyes for 1.5 s (the strip shows the text notification)
     void ShowVolume(int volume) {
@@ -224,6 +230,7 @@ private:
                 lana_ui::Model m = model_;
                 m.rssi = rssi_;
                 m.battery = battery_; m.charging = charging_;
+                if (m.wx > 0 && now_us - weather_us_ > 2LL * 3600 * 1000000) m.wx = 0;
                 m.hh = tmv.tm_hour; m.mm = tmv.tm_min; m.ss = tmv.tm_sec;
                 m.wday = tmv.tm_wday; m.mday = tmv.tm_mday; m.mon = tmv.tm_mon + 1;
                 if (!notif_.empty() && now_us < notif_until_us_) m.status = notif_;
@@ -254,6 +261,7 @@ private:
 
     lana_ui::Ui* ui_ = nullptr;
     lana_ui::Model model_;
+    int64_t weather_us_ = 0;
     std::mutex mutex_;
     bool show_icon_ = false;
     bool alarm_ = false;

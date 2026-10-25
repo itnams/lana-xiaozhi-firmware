@@ -10,6 +10,7 @@
 #include <esp_mn_speech_commands.h>
 #include <cJSON.h>
 #include <algorithm>
+#include <atomic>
 #include <string>
 #include <vector>
 
@@ -18,6 +19,11 @@
 
 // Lana: "<command>|<prob>" of the last detection, sent to the server with the wake detect (protocol.cc)
 std::string g_lana_wake_detail;
+// Lana 2.2.5: true while the server says a story/song is playing (push {"type":"lana","action":"media","on":..}).
+// Only then are the "dừng lại" stop commands acted on (and wake detection runs during Speaking at all).
+std::atomic<bool> g_lana_media_on{false};
+#define LANA_STOP_TEXT "Dừng lại"
+#define LANA_STOP_MIN_PROB 0.18f
 
 
 CustomWakeWord::CustomWakeWord()
@@ -134,6 +140,13 @@ bool CustomWakeWord::Initialize(AudioCodec* codec, srmodel_list_t* models_list) 
         models_ = models_list;
         ParseWakenetModelConfig();
     }
+#ifdef LANA_WAKE_AFE
+    // 2.2.5: "dừng lại" (+ southern "yừng lại", "dừng lại đi") as pinyin approximations; action "stop" is ignored
+    // unless media is playing, so the TV saying it while idle does nothing.
+    for (const char* w : {"deng lai", "dong lai", "yong lai", "deng lai di", "dong lai di"}) {
+        commands_.push_back({w, LANA_STOP_TEXT, "stop"});
+    }
+#endif
 
     if (models_ == nullptr || models_->num == -1) {
         ESP_LOGE(TAG, "Failed to initialize wakenet model");
@@ -327,7 +340,11 @@ void CustomWakeWord::DetectChunk(int16_t* chunk) {
             ESP_LOGI(TAG, "Custom wake word detected: command_id=%d, string=%s, prob=%f", 
                     mn_result->command_id[i], mn_result->string, mn_result->prob[i]);
             auto& command = commands_[mn_result->command_id[i] - 1];
-            if (command.action == "wake") {
+            if (command.action == "stop" && (!g_lana_media_on.load() || mn_result->prob[i] < LANA_STOP_MIN_PROB)) {
+                ESP_LOGI(TAG, "Stop phrase ignored (media %d, prob %.3f)", (int)g_lana_media_on.load(), mn_result->prob[i]);
+                continue;
+            }
+            if (command.action == "wake" || command.action == "stop") {
                 last_detected_wake_word_ = command.text;
                 char detail[96];
                 snprintf(detail, sizeof(detail), "%s|%.3f", command.command.c_str(), mn_result->prob[i]);

@@ -31,6 +31,8 @@ struct Model {
     int rssi = 0;              // dBm, 0 = unknown / not connected
     int battery = -1;          // %, -1 = no battery sense (indicator hidden)
     bool charging = false;
+    int temp = 0;              // °C, shown on the clock when wx > 0
+    int wx = 0;                // 0 none, 1 sun, 2 partly cloudy, 3 cloud, 4 rain, 5 storm
 };
 
 // ---- text ------------------------------------------------------------------------------------------------------
@@ -137,6 +139,16 @@ inline int IconBattery(Canvas& c, int x, int y, int pct, bool charging) {
     if (charging) { c.Set(x + 5, y + 1, 0); c.Set(x + 4, y + 2, 0); c.Fill(x + 3, y + 3, 4, 1, 0); c.Set(x + 5, y + 4, 0); c.Set(x + 4, y + 5, 0);
                     c.Set(x + 5, y + 1, 1 - (f > 4)); }
     return 11;
+}
+// 11x9 weather icons for the clock screen
+inline void IconWeather(Canvas& c, int x, int y, int wx) {
+    static const char* const sun[] = {"X....X....X", ".X.......X.", "....XXX....", "...XXXXX...", "XX.XXXXX.XX", "...XXXXX...", "....XXX....", ".X.......X.", "X....X....X"};
+    static const char* const partly[] = {"......X..X.", "........XX.", ".......XXXX", "...XXX.XXX.", ".XX...XXX..", "X.......X..", "X........X.", ".X.......X.", "..XXXXXXX.."};
+    static const char* const cloud[] = {"...........", "....XXX....", "...X...X...", ".XX.....XX.", "X.........X", "X.........X", "X.........X", ".XXXXXXXXX.", "..........."};
+    static const char* const rain[] = {"....XXX....", "..XX...XX..", ".X.......X.", "X.........X", ".XXXXXXXXX.", "...........", ".X..X..X...", "X..X..X....", "..........."};
+    static const char* const storm[] = {"....XXX....", "..XX...XX..", ".X.......X.", "X.........X", ".XXXX.XXXX.", ".....X.....", "....XXX....", "......X....", ".....X....."};
+    const char* const* a = wx == 1 ? sun : wx == 2 ? partly : wx == 3 ? cloud : wx == 4 ? rain : storm;
+    Art(c, x, y, a, 9);
 }
 inline bool BatteryLow(const Model& m) { return m.battery >= 0 && m.battery < 15 && !m.charging; }
 
@@ -276,7 +288,20 @@ private:
             IconBattery(c, W - 13 + dx - 1, 54 + dy, m.battery, m.charging);
             if (!(BatteryLow(m) && (t_ / 500) % 2)) c.Text(W - 15 - TextWidth(b) + dx, 49 + dy, b); }
         std::string d = ShortDate(m.wday, m.mday, m.mon);
-        c.Text((W - TextWidth(d)) / 2 + dx, 49 + dy, d);
+        if (m.wx > 0) {   // date left, weather (icon + "31°") right; with a battery shown: weather left, no date
+            char t[12]; snprintf(t, sizeof(t), "%d°", m.temp);
+            if (m.battery >= 0) {
+                IconWeather(c, 2 + dx, 52 + dy, m.wx);
+                c.Text(15 + dx, 49 + dy, t);
+            } else {
+                int tx = W - 2 + dx - TextWidth(t);
+                c.Text(tx, 49 + dy, t);
+                IconWeather(c, tx - 13, 52 + dy, m.wx);
+                c.Text(2 + dx, 49 + dy, d);
+            }
+        } else {
+            c.Text((W - TextWidth(d)) / 2 + dx, 49 + dy, d);
+        }
     }
 
     void RenderAlarm(Canvas& c, const Model& m) {

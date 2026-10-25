@@ -41,6 +41,7 @@ public:
     virtual void SetPowerSaveMode(bool on);
     virtual void SetIdleClockMinutes(int minutes) {}   // Lana: idle clock (only the lana-tim face implements it)
     virtual void LanaShowVolume(int volume) {}          // Lana: volume bar (lana-tim face)
+    virtual void LanaSetWeather(int temp_c, int icon) {} // Lana: clock-screen weather (icon 1 sun 2 partly 3 cloud 4 rain 5 storm)
 
     inline int width() const { return width_; }
     inline int height() const { return height_; }

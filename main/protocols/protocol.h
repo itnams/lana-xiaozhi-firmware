@@ -32,7 +32,8 @@ struct BinaryProtocol3 {
 
 enum AbortReason {
     kAbortReasonNone,
-    kAbortReasonWakeWordDetected
+    kAbortReasonWakeWordDetected,
+    kAbortReasonLanaStop   // "dừng lại" during media: server pauses it quietly
 };
 
 enum ListeningMode {

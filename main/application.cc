@@ -22,6 +22,12 @@
 #include <algorithm>
 #include <esp_timer.h>
 
+#include <atomic>
+#include <cmath>
+#ifdef CONFIG_BOARD_TYPE_LANA_TIM
+extern std::atomic<bool> g_lana_media_on;   // custom_wake_word.cc
+#endif
+
 #define TAG "Application"
 
 
@@ -487,6 +493,9 @@ void Application::Start() {
         }
     });
     protocol_->OnAudioChannelClosed([this, &board]() {
+#ifdef CONFIG_BOARD_TYPE_LANA_TIM
+        g_lana_media_on = false;
+#endif
         board.SetPowerSaveMode(true);
         Schedule([this]() {
             auto display = Board::GetInstance().GetDisplay();
@@ -692,6 +701,21 @@ void Application::OnWakeWordDetected() {
     if (!protocol_) {
         return;
     }
+#ifdef CONFIG_BOARD_TYPE_LANA_TIM
+    const bool lana_stop = audio_service_.GetLastWakeWord() == "Dừng lại";
+    if (lana_stop && !(device_state_ == kDeviceStateSpeaking && g_lana_media_on.load())) {
+        ESP_LOGI(TAG, "Lana: stop phrase outside media playback ignored");
+        audio_service_.EnableWakeWordDetection(device_state_ == kDeviceStateIdle ||
+                                               (device_state_ == kDeviceStateSpeaking && g_lana_media_on.load()));
+        return;
+    }
+    if (device_state_ == kDeviceStateSpeaking && g_lana_media_on.load()) {
+        ESP_LOGI(TAG, "Lana: %s during media -> abort", lana_stop ? "stop phrase" : "wake word");
+        AbortSpeaking(lana_stop ? kAbortReasonLanaStop : kAbortReasonWakeWordDetected);
+        g_lana_media_on = false;
+        return;
+    }
+#endif
 
     if (device_state_ == kDeviceStateIdle) {
         audio_service_.EncodeWakeWord();
@@ -787,7 +811,12 @@ void Application::SetDeviceState(DeviceState state) {
             if (listening_mode_ != kListeningModeRealtime) {
                 audio_service_.EnableVoiceProcessing(false);
                 // Only AFE wake word can be detected in speaking mode
+#ifdef CONFIG_BOARD_TYPE_LANA_TIM
+                // 2.2.5: Lana's MultiNet also listens while a story/song plays ("dừng lại" / wake = stop)
+                audio_service_.EnableWakeWordDetection(audio_service_.IsAfeWakeWord() || g_lana_media_on.load());
+#else
                 audio_service_.EnableWakeWordDetection(audio_service_.IsAfeWakeWord());
+#endif
             }
             audio_service_.ResetDecoder();
             break;
@@ -1021,6 +1050,25 @@ void Application::HandleLanaMessage(const cJSON* root) {
                 Board::GetInstance().GetDisplay()->SetIdleClockMinutes(v);
             });
         }
+    } else if (act == "weather") {
+        auto temp = cJSON_GetObjectItem(root, "temp");
+        auto icon = cJSON_GetObjectItem(root, "icon");
+        if (cJSON_IsNumber(temp) && cJSON_IsString(icon)) {
+            std::string ic = icon->valuestring;
+            int wx = ic == "sun" ? 1 : ic == "partly" ? 2 : ic == "cloud" ? 3 : ic == "rain" ? 4 : ic == "storm" ? 5 : 0;
+            int t = (int)lround(temp->valuedouble);
+            Schedule([t, wx]() { Board::GetInstance().GetDisplay()->LanaSetWeather(t, wx); });
+            ESP_LOGI(TAG, "Lana push weather %d C icon %d", t, wx);
+        }
+    } else if (act == "media") {
+        bool on = cJSON_IsTrue(cJSON_GetObjectItem(root, "on"));
+        g_lana_media_on = on;
+        ESP_LOGI(TAG, "Lana: media %s", on ? "on" : "off");
+        Schedule([this, on]() {
+            if (device_state_ == kDeviceStateSpeaking && listening_mode_ != kListeningModeRealtime) {
+                audio_service_.EnableWakeWordDetection(on || audio_service_.IsAfeWakeWord());
+            }
+        });
     } else if (act == "stop") {
         Schedule([this]() {
             auto display = Board::GetInstance().GetDisplay();

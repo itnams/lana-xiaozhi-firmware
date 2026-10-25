@@ -118,3 +118,12 @@ maps every `SetPowerSaveMode()` call to `WIFI_PS_NONE` and forces it right after
   (main/CMakeLists.txt filter) and unused LVGL widgets/decoders (sdkconfig.lana). Kept: label, image, flex,
   default theme, imgfont (xiaozhi-fonts emoji), 16-bit colour (esp_lvgl_port SSD1306 mono path).
 - App 2,619,072 -> 2,439,104 B (-176 KB); DIRAM used 155,759 -> 145,347 B (+10.4 KB free).
+
+## 2.2.5-lana (Oct 25): "dừng lại" stops media, clock-screen weather
+- While the server says a story/song is playing (push `{"type":"lana","action":"media","on":true|false}`), the MultiNet
+  wake detector keeps running in Speaking state. Extra commands `deng lai; dong lai; yong lai; deng lai di; dong lai di`
+  (action "stop", min prob 0.18) send `{"type":"abort","reason":"lana_stop"}` -> server pauses quietly. A wake phrase
+  during media aborts as before (server pauses + asks what next). Outside media the stop phrases are ignored
+  (idle: no session is opened); during normal replies nothing listens (unchanged). Flag cleared on channel close.
+- Push `{"type":"lana","action":"weather","temp":31,"icon":"sun|partly|cloud|rain|storm"}` (server lanawx.py, Open-Meteo,
+  every 15 min): icon + temperature at the bottom-right of the idle clock, date moves left; hidden after 2 h without update.
