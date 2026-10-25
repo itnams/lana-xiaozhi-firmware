@@ -104,3 +104,11 @@ maps every `SetPowerSaveMode()` call to `WIFI_PS_NONE` and forces it right after
   (`tools/gen_vi_font.py`), because outline fonts lose the marks at this size.
 - Previews: `g++ -O2 -std=c++17 -I main/boards/lana-tim tools/eyes_preview.cc -o /tmp/eyes_preview && /tmp/eyes_preview RAW`
   then `tools/ui_preview.py RAW OUT` (1x/4x PNG + GIF, contact_sheet.png).
+
+### 2.2.4-lana (rebuild): server pushes for volume / face, battery-ready UI
+- Push `{"type":"lana","action":"volume","volume":0-100}`: speaker volume (saved) + volume bar.
+- Push `{"type":"lana","action":"emotion","emotion":"happy","hold_s":30}`: shows the face; with hold_s>0 reply
+  emotions are ignored until it ends, then neutral; hold_s=0 lasts until the next reply.
+- Battery: status-strip icon + %, clock corner %, blinking low-battery icon <15 %. Hidden: this robot has no battery
+  sense. To enable, fit a 100k/100k divider BAT+ -> GPIO1 (ADC1_CH0) -> GND (+100 nF), optional TP4056 CHRG -> GPIO2,
+  then uncomment LANA_BATTERY_ADC_GPIO / LANA_BATTERY_CHARGE_GPIO in config.h. The level is also sent in the OTA board JSON.

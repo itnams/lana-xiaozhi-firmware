@@ -18,6 +18,9 @@
 #include <font_awesome.h>
 #include <esp_netif_sntp.h>
 #include <ctime>
+#include <thread>
+#include <algorithm>
+#include <esp_timer.h>
 
 #define TAG "Application"
 
@@ -541,6 +544,9 @@ void Application::Start() {
             auto emotion = cJSON_GetObjectItem(root, "emotion");
             if (cJSON_IsString(emotion)) {
                 Schedule([this, display, emotion_str = std::string(emotion->valuestring)]() {
+#ifdef CONFIG_BOARD_TYPE_LANA_TIM
+                    if (esp_timer_get_time() < lana_emotion_hold_until_us_) return;   // face pushed with hold_s
+#endif
                     display->SetEmotion(emotion_str.c_str());
                 });
             }
@@ -988,6 +994,9 @@ void Application::LanaStartTime() {
 //    tell the server "lana_push:<id>" as the wake word; the server then speaks the text (verbatim or via Gemini).
 // {"type":"lana","action":"config","clock_idle_min":2}
 // {"type":"lana","action":"stop"}  -> back to the normal face
+// {"type":"lana","action":"volume","volume":70}  -> speaker volume 0-100 (saved), volume bar on the face
+// {"type":"lana","action":"emotion","emotion":"happy","hold_s":30}  -> show a face; hold_s>0: reply emotions are
+//    ignored for that long, then back to neutral; hold_s=0: until the next reply emotion
 void Application::HandleLanaMessage(const cJSON* root) {
     auto action = cJSON_GetObjectItem(root, "action");
     if (!cJSON_IsString(action)) return;
@@ -1018,6 +1027,43 @@ void Application::HandleLanaMessage(const cJSON* root) {
             if (device_state_ == kDeviceStateIdle) DismissAlert();
             else display->SetEmotion("neutral");
         });
+    } else if (act == "volume") {
+        auto vol = cJSON_GetObjectItem(root, "volume");
+        if (cJSON_IsNumber(vol)) {
+            int v = std::max(0, std::min(100, vol->valueint));
+            Schedule([v]() {
+                auto& board = Board::GetInstance();
+                board.GetAudioCodec()->SetOutputVolume(v);
+                auto display = board.GetDisplay();
+                display->ShowNotification(std::string(Lang::Strings::VOLUME) + std::to_string(v));
+                display->LanaShowVolume(v);
+                ESP_LOGI(TAG, "Lana push volume %d", v);
+            });
+        }
+    } else if (act == "emotion") {
+        auto emo = cJSON_GetObjectItem(root, "emotion");
+        auto hold = cJSON_GetObjectItem(root, "hold_s");
+        if (cJSON_IsString(emo)) {
+            std::string e = emo->valuestring;
+            int hs = cJSON_IsNumber(hold) ? std::max(0, std::min(3600, hold->valueint)) : 0;
+            Schedule([this, e, hs]() {
+                lana_emotion_hold_until_us_ = hs > 0 ? esp_timer_get_time() + (int64_t)hs * 1000000 : 0;
+                Board::GetInstance().GetDisplay()->SetEmotion(e.c_str());
+                ESP_LOGI(TAG, "Lana push emotion %s hold %ds", e.c_str(), hs);
+                if (hs > 0) {
+                    // back to neutral when the hold ends (unless a newer push extended it)
+                    std::thread([this, hs]() {
+                        vTaskDelay(pdMS_TO_TICKS(hs * 1000 + 50));
+                        Schedule([this]() {
+                            if (lana_emotion_hold_until_us_ != 0 && esp_timer_get_time() >= lana_emotion_hold_until_us_) {
+                                lana_emotion_hold_until_us_ = 0;
+                                Board::GetInstance().GetDisplay()->SetEmotion("neutral");
+                            }
+                        });
+                    }).detach();
+                }
+            });
+        }
     } else if (act == "reboot") {
         // e.g. to pick up a new OTA offer (the version check runs at boot); only when idle
         Schedule([this]() {

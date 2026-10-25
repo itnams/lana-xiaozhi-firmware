@@ -40,6 +40,7 @@ public:
     virtual void UpdateStatusBar(bool update_all = false);
     virtual void SetPowerSaveMode(bool on);
     virtual void SetIdleClockMinutes(int minutes) {}   // Lana: idle clock (only the lana-tim face implements it)
+    virtual void LanaShowVolume(int volume) {}          // Lana: volume bar (lana-tim face)
 
     inline int width() const { return width_; }
     inline int height() const { return height_; }

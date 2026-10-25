@@ -181,6 +181,13 @@ std::string WifiBoard::GetBoardJson() {
         board_json += R"("channel":)" + std::to_string(wifi_station.GetChannel()) + R"(,)";
         board_json += R"("ip":")" + wifi_station.GetIpAddress() + R"(",)";
     }
+#ifdef CONFIG_BOARD_TYPE_LANA_TIM
+    {   // Lana: battery for the web page (only boards with battery sense)
+        int lvl = 0; bool chg = false, dis = false;
+        if (GetBatteryLevel(lvl, chg, dis))
+            board_json += R"("battery":{"level":)" + std::to_string(lvl) + R"(,"charging":)" + (chg ? "true" : "false") + "},";
+    }
+#endif
     board_json += R"("mac":")" + SystemInfo::GetMacAddress() + R"(")";
     board_json += R"(})";
     return board_json;

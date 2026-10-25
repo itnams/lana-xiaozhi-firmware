@@ -11,6 +11,7 @@
 #include "display/oled_display.h"
 #include "assets/lang_config.h"
 #include "lana_ui.h"
+#include "board.h"
 #include <font_awesome.h>
 #include <esp_random.h>
 #include <esp_log.h>
@@ -171,6 +172,8 @@ public:
         if (s != model_.subtitle) { model_.subtitle = s; ui_->ResetScroll(); }
     }
 
+    virtual void LanaShowVolume(int volume) override { ShowVolume(volume); }
+
     // Volume buttons: bar drawn under the eyes for 1.5 s (the strip shows the text notification)
     void ShowVolume(int volume) {
         if (face_ == nullptr) return;
@@ -207,6 +210,9 @@ private:
                 next_rssi_us = now_us + 5000000;
                 wifi_ap_record_t ap = {};
                 rssi_ = (esp_wifi_sta_get_ap_info(&ap) == ESP_OK) ? ap.rssi : 0;
+                int lvl = 0; bool chg = false, dis = false;   // boards without battery sense return false -> hidden
+                if (Board::GetInstance().GetBatteryLevel(lvl, chg, dis)) { battery_ = lvl; charging_ = chg; }
+                else battery_ = -1;
             }
             time_t now = time(nullptr);
             struct tm tmv;
@@ -217,6 +223,7 @@ private:
                 std::lock_guard<std::mutex> g(mutex_);
                 lana_ui::Model m = model_;
                 m.rssi = rssi_;
+                m.battery = battery_; m.charging = charging_;
                 m.hh = tmv.tm_hour; m.mm = tmv.tm_min; m.ss = tmv.tm_sec;
                 m.wday = tmv.tm_wday; m.mday = tmv.tm_mday; m.mon = tmv.tm_mon + 1;
                 if (!notif_.empty() && now_us < notif_until_us_) m.status = notif_;
@@ -254,6 +261,8 @@ private:
     std::string notif_;
     int64_t notif_until_us_ = 0;
     volatile int rssi_ = 0;
+    volatile int battery_ = -1;
+    volatile bool charging_ = false;
     uint8_t* frame_ = nullptr;
     uint8_t* scratch_ = nullptr;
     lv_image_dsc_t dsc_;

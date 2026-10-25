@@ -29,6 +29,8 @@ struct Model {
     std::string ssid, url;     // wifi setup
     int hh = 0, mm = 0, ss = 0, wday = 0, mday = 1, mon = 1;
     int rssi = 0;              // dBm, 0 = unknown / not connected
+    int battery = -1;          // %, -1 = no battery sense (indicator hidden)
+    bool charging = false;
 };
 
 // ---- text ------------------------------------------------------------------------------------------------------
@@ -125,6 +127,19 @@ inline void IconBell(Canvas& c, int x, int y, uint8_t v = 1) {
 inline void IconSpinner(Canvas& c, int x, int y, int phase) {   // three bouncing dots
     for (int k = 0; k < 3; k++) c.Fill(x + k * 4, y + (phase % 3 == k ? 3 : 5), 3, 3);
 }
+// 11x7 battery outline + fill; charging = bolt cut-out; returns width drawn
+inline int IconBattery(Canvas& c, int x, int y, int pct, bool charging) {
+    c.HLine(x, x + 9, y); c.HLine(x, x + 9, y + 6);
+    for (int j = y; j <= y + 6; j++) { c.Set(x, j); c.Set(x + 9, j); }
+    c.Fill(x + 10, y + 2, 1, 3);
+    int f = (pct * 8 + 50) / 100; if (pct > 0 && f == 0) f = 1;
+    c.Fill(x + 1, y + 1, f, 5);
+    if (charging) { c.Set(x + 5, y + 1, 0); c.Set(x + 4, y + 2, 0); c.Fill(x + 3, y + 3, 4, 1, 0); c.Set(x + 5, y + 4, 0); c.Set(x + 4, y + 5, 0);
+                    c.Set(x + 5, y + 1, 1 - (f > 4)); }
+    return 11;
+}
+inline bool BatteryLow(const Model& m) { return m.battery >= 0 && m.battery < 15 && !m.charging; }
+
 inline int RssiBars(int rssi) { return rssi == 0 ? 0 : rssi >= -55 ? 4 : rssi >= -65 ? 3 : rssi >= -75 ? 2 : 1; }
 
 // ---- 7-segment digits with chamfered ends (clock) ----------------------------------------------------------------
@@ -184,12 +199,25 @@ private:
 
     bool NeedStrip(const Model& m) const { return !m.status.empty(); }
 
+    // battery: in the strip (icon + %), or alone in the top-right corner when low (<15 %, blinking)
+    int Battery(Canvas& c, const Model& m, int right, int y, bool with_pct) {
+        if (m.battery < 0) return right;
+        if (BatteryLow(m) && (t_ / 500) % 2) return right - 12;
+        char b[16]; snprintf(b, sizeof(b), "%d%%", m.battery);
+        int x = right - 11;
+        IconBattery(c, x, y + 1, m.battery, m.charging);
+        if (with_pct) { int w = TextWidth(b); c.SetClip(0, kStripH); c.Text(x - 2 - w, y - 2, b); c.ResetClip(); x -= 2 + w; }
+        return x - 2;
+    }
+
     void Eyes(Canvas& c, int top, int bottom_reserved) {
         int area = H - top - bottom_reserved;
         eyes_.SetReservedBottom(H - area);
         eyes_.Render(eye_px_);
         for (int y = 0; y < area; y++) memcpy(c.px() + (top + y) * W, eye_px_ + y * W, W);
     }
+
+    static bool s_has_room(const Model& m) { return TextWidth(m.status) < 62; }
 
     void Strip(Canvas& c, const Model& m, bool force) {
         if (!force && !NeedStrip(m)) return;
@@ -199,6 +227,7 @@ private:
         else if (m.state == lana_eyes::kStateConnecting) { IconSpinner(c, x, 1, ph); x += 14; }
         int bars = RssiBars(m.rssi);
         int right = bars ? W - 13 : W;
+        right = Battery(c, m, right - 1, 1, s_has_room(m)) ;
         std::string s = StripText(m);
         c.SetClip(0, kStripH);
         // text cell starts 1 row above the strip (row 0 of the cell only holds the tone of a stacked capital)
@@ -226,6 +255,7 @@ private:
         bool strip = NeedStrip(m), sub = !m.subtitle.empty();
         Eyes(c, strip ? kStripH : 0, sub ? kSubH : 0);
         Strip(c, m, false);
+        if (!strip && BatteryLow(m)) { c.Fill(W - 24, 0, 24, 9, 0); Battery(c, m, W - 1, 0, false); c.Text(W - 23, -3, "!"); }
         if (sub) Subtitle(c, m.subtitle, H - kSubH);
     }
 
@@ -242,6 +272,9 @@ private:
         x += colon;
         Digit(c, x, y0, dw, dh, th, m.mm / 10); x += dw + gap;
         Digit(c, x, y0, dw, dh, th, m.mm % 10);
+        if (m.battery >= 0) { char b[16]; snprintf(b, sizeof(b), "%d%%", m.battery);
+            IconBattery(c, W - 13 + dx - 1, 54 + dy, m.battery, m.charging);
+            if (!(BatteryLow(m) && (t_ / 500) % 2)) c.Text(W - 15 - TextWidth(b) + dx, 49 + dy, b); }
         std::string d = ShortDate(m.wday, m.mday, m.mon);
         c.Text((W - TextWidth(d)) / 2 + dx, 49 + dy, d);
     }

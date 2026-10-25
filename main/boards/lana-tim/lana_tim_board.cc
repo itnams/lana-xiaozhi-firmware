@@ -21,6 +21,11 @@
 #include <esp_lcd_io_i2c.h>
 #include <esp_lcd_panel_ops.h>
 #include <esp_lcd_panel_vendor.h>
+#include "config.h"
+#ifdef LANA_BATTERY_ADC_GPIO
+#include <esp_adc/adc_oneshot.h>
+#include <esp_adc/adc_cali_scheme.h>
+#endif
 
 #ifdef SH1106
 #include <esp_lcd_panel_sh1106.h>
@@ -287,6 +292,9 @@ public:
         InitializeSsd1306Display();
         InitializeButtons();
         InitializeTools();
+#ifdef LANA_BATTERY_ADC_GPIO
+        if (!InitBattery()) ESP_LOGW(TAG, "battery ADC init failed");
+#endif
     }
 
     // 2.2.4: the app turns modem sleep on whenever the audio channel closes; Lana is mains powered and needs a
@@ -295,6 +303,57 @@ public:
         (void)enabled;
         WifiBoard::SetPowerSaveMode(false);
     }
+
+#ifdef LANA_BATTERY_ADC_GPIO
+    // Smoothed 1S LiPo level: ADC1 oneshot (12 dB atten, curve-fitting calibration) through the divider, EMA over
+    // ~1 min of 30 s polls, then a piecewise-linear resting-voltage curve.
+    adc_oneshot_unit_handle_t bat_adc_ = nullptr;
+    adc_cali_handle_t bat_cali_ = nullptr;
+    adc_channel_t bat_ch_ = ADC_CHANNEL_0;
+    float bat_v_ = 0;
+    bool InitBattery() {
+        adc_unit_t unit;
+        if (adc_oneshot_io_to_channel(LANA_BATTERY_ADC_GPIO, &unit, &bat_ch_) != ESP_OK || unit != ADC_UNIT_1) return false;
+        adc_oneshot_unit_init_cfg_t ucfg = {.unit_id = ADC_UNIT_1};
+        if (adc_oneshot_new_unit(&ucfg, &bat_adc_) != ESP_OK) return false;
+        adc_oneshot_chan_cfg_t ccfg = {.atten = ADC_ATTEN_DB_12, .bitwidth = ADC_BITWIDTH_DEFAULT};
+        adc_oneshot_config_channel(bat_adc_, bat_ch_, &ccfg);
+        adc_cali_curve_fitting_config_t cc = {.unit_id = ADC_UNIT_1, .chan = bat_ch_, .atten = ADC_ATTEN_DB_12, .bitwidth = ADC_BITWIDTH_DEFAULT};
+        adc_cali_create_scheme_curve_fitting(&cc, &bat_cali_);
+#ifdef LANA_BATTERY_CHARGE_GPIO
+        gpio_config_t g = {.pin_bit_mask = 1ULL << LANA_BATTERY_CHARGE_GPIO, .mode = GPIO_MODE_INPUT, .pull_up_en = GPIO_PULLUP_ENABLE};
+        gpio_config(&g);
+#endif
+        return true;
+    }
+    static int LipoPercent(float v) {
+        static const float kV[] = {3.30f, 3.50f, 3.61f, 3.69f, 3.75f, 3.79f, 3.83f, 3.87f, 3.92f, 3.97f, 4.06f, 4.15f};
+        static const int kP[] = {0, 5, 10, 20, 30, 40, 50, 60, 70, 80, 90, 100};
+        if (v <= kV[0]) return 0;
+        for (int i = 1; i < 12; i++) if (v < kV[i]) return kP[i - 1] + (int)((v - kV[i - 1]) / (kV[i] - kV[i - 1]) * (kP[i] - kP[i - 1]));
+        return 100;
+    }
+public:
+    virtual bool GetBatteryLevel(int& level, bool& charging, bool& discharging) override {
+        if (bat_adc_ == nullptr) return false;
+        int sum = 0, n = 0;
+        for (int i = 0; i < 16; i++) { int raw, mv; if (adc_oneshot_read(bat_adc_, bat_ch_, &raw) == ESP_OK) {
+            if (bat_cali_ && adc_cali_raw_to_voltage(bat_cali_, raw, &mv) == ESP_OK) { sum += mv; n++; } } }
+        if (n == 0) return false;
+        float v = sum / (float)n / 1000.0f * LANA_BATTERY_DIVIDER;
+        if (v < 2.5f) return false;   // nothing connected
+        bat_v_ = bat_v_ <= 0 ? v : bat_v_ * 0.6f + v * 0.4f;
+        level = LipoPercent(bat_v_);
+#ifdef LANA_BATTERY_CHARGE_GPIO
+        charging = gpio_get_level(LANA_BATTERY_CHARGE_GPIO) == 0;
+#else
+        charging = false;
+#endif
+        discharging = !charging;
+        return true;
+    }
+private:
+#endif
 
     virtual Led* GetLed() override {
         static SingleLed led(BUILTIN_LED_GPIO);

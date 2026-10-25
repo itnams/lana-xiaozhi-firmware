@@ -65,6 +65,13 @@
 #error "未选择 OLED 屏幕类型"
 #endif
 
+// Battery sense (NOT wired on this robot -> indicator hidden). To enable: 100k/100k divider from battery+ to GND,
+// midpoint to GPIO1 (ADC1_CH0, free, not motors/buttons/I2C/I2S; ADC2 is unusable with Wi-Fi) with 100 nF to GND,
+// optional TP4056 CHRG (open drain) to GPIO2 with the internal pull-up, then uncomment:
+// #define LANA_BATTERY_ADC_GPIO     GPIO_NUM_1
+// #define LANA_BATTERY_CHARGE_GPIO  GPIO_NUM_2
+#define LANA_BATTERY_DIVIDER      2.0f
+
 #define DISPLAY_MIRROR_X true
 #define DISPLAY_MIRROR_Y true
 

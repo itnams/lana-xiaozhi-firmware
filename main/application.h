@@ -85,6 +85,7 @@ private:
     int clock_ticks_ = 0;
     // Lana 2.2.2: audio that arrives while still Listening is kept and starts the reply (no early tts start needed)
     std::mutex lana_early_mutex_;
+    volatile int64_t lana_emotion_hold_until_us_ = 0;   // server-pushed face held: reply emotions ignored until then
     std::deque<std::unique_ptr<AudioStreamPacket>> lana_early_;
     bool lana_early_pending_ = false;
     bool lana_spk_by_audio_ = false;
