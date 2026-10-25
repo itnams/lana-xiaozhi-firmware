@@ -332,15 +332,40 @@ private:
         int zs = 2 + (int)(ph * 3), zx = cx + 12 + (int)(ph * 4), zy = cy - 5 - (int)(ph * 8);
         for (int i = 0; i <= zs; i++) { c.Set(zx + i, zy); c.Set(zx + i, zy + zs); c.Set(zx + zs - i, zy + i); }
     }
+    // ---- style E (2.2.7): clock card + inverted weather card + date strip ----
+    static void RRect(Canvas& c, int x, int y, int w, int h, int r, bool fill, uint8_t v = 1) {
+        for (int j = 0; j < h; j++) for (int i = 0; i < w; i++) {
+            int cx = i < r ? r - i : i >= w - r ? i - (w - r - 1) : 0, cy = j < r ? r - j : j >= h - r ? j - (h - r - 1) : 0;
+            float d = std::sqrt((float)(cx * cx + cy * cy));
+            bool in = d <= r + 0.3f, edge = fill ? in : (in && (d > r - 0.9f || i == 0 || j == 0 || i == w - 1 || j == h - 1));
+            if (cx == 0 && cy == 0) edge = fill || i == 0 || j == 0 || i == w - 1 || j == h - 1;
+            if (edge) c.Set(x + i, y + j, v);
+        }
+    }
+    void RenderClockE(Canvas& c, const Model& m, int dx, int dy) {
+        char t[12]; snprintf(t, sizeof(t), "%d°", m.temp);
+        static const char* const kD[7] = {"Chủ nhật", "Thứ hai", "Thứ ba", "Thứ tư", "Thứ năm", "Thứ sáu", "Thứ bảy"};
+        char dm[8]; snprintf(dm, sizeof(dm), "%02d/%02d", m.mday, m.mon);
+            RRect(c, 0 + dx, 0 + dy, 82, 48, 6, false);
+            ClockDigits(c, m, 1 + dx, 80, 7 + dy, 15, 34, 3.4f, 3, 8);
+            RRect(c, 85 + dx, 0 + dy, 42, 48, 6, true);
+            if (m.wx > 0) { static uint8_t b[W * H]; Canvas tc(b); tc.Clear(); IconWeather(tc, 0, 0, m.wx);
+                for (int j = 0; j < 9; j++) for (int i = 0; i < 11; i++) if (b[j * W + i]) c.Fill(95 + i * 2 + dx, 6 + j * 2 + dy, 2, 2, 0);
+                c.Text(85 + (42 - TextWidth(t, true)) / 2 + dx, 29 + dy, t, true, 0); }
+            else c.Text(85 + (42 - TextWidth("--")) / 2 + dx, 17 + dy, "--", false, 0);
+            std::string d = std::string(kD[m.wday % 7]) + " · " + dm;
+            c.Text((W - TextWidth(d)) / 2 + dx, 50 + dy, d);
+    }
 public:
     void SetClockStyle(int s) { clock_style_ = s; }
 private:
-    int clock_style_ = 1;   // B: clock + dozing face (chosen Oct 25)
+    int clock_style_ = 3;   // E: card layout (chosen Oct 25, 2.2.7); 1 = B, 2 = C, 0 = A
 
     void RenderClock(Canvas& c, const Model& m) {
         // burn-in care: the whole screen drifts by 1 px in a 4-minute cycle
         static const int kdx[4] = {0, 1, 1, 0}, kdy[4] = {0, 0, 1, 1};
         int dx = kdx[m.mm % 4], dy = kdy[m.mm % 4];
+        if (clock_style_ == 3) { RenderClockE(c, m, dx, dy); return; }
         if (clock_style_ == 1) {          // B: clock left + date under it, dozing face + weather on the right
             ClockDigits(c, m, 0 + dx, 84, 4 + dy, 15, 30, 3.6f, 3, 8);
             c.Text(4 + dx, 40 + dy, ShortDate(m.wday, m.mday, m.mon));

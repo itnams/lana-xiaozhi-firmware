@@ -136,3 +136,7 @@ maps every `SetPowerSaveMode()` call to `WIFI_PS_NONE` and forces it right after
 - Idle clock redesigned: rounded capsule 7-segment digits, round blinking colon, dotted separator, info row
   (date left, weather icon + temp / battery right). `Ui::SetClockStyle(0|1|2)`: B default (clock + dozing face), A big clock,
   C clock + seconds bar. Previews: `idleA_*`, `idleB_*`, `idleC_*`.
+
+### 2.2.7-lana: idle clock style E (default)
+- Card layout: rounded clock card (left), inverted weather card with 2x icon + bold temperature (right),
+  full Vietnamese weekday + date strip at the bottom. `SetClockStyle(3)` = E (default); 0 = A, 1 = B, 2 = C. Previews: `idleD_*`.

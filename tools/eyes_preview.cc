@@ -9,7 +9,7 @@ using namespace lana_ui;
 
 static std::string g_dir;
 
-static int g_style = 1;
+static int g_style = 3;
 static void run(const std::string& name, Model m, int emotion, int ms, int step_ms = 40, int volume = -1) {
     Ui ui(777); ui.SetClockStyle(g_style);
     ui.eyes().SetState(kStateIdle);
@@ -58,13 +58,13 @@ int main(int argc, char** argv) {
     { Model m = idle; m.screen = kScreenClock; m.hh = 14; m.mm = 33; m.ss = 0; m.wday = 0; m.mday = 25; m.mon = 10; m.temp = 27; m.wx = 4; run("clock_wx_rain", m, kSleepy, 1000, 240); }
     { Model m = idle; m.screen = kScreenClock; m.hh = 14; m.mm = 34; m.ss = 0; m.wday = 0; m.mday = 25; m.mon = 10; m.temp = -5; m.wx = 5; run("clock_wx_storm", m, kSleepy, 1000, 240); }
     { Model m = idle; m.screen = kScreenClock; m.hh = 9; m.mm = 5; m.battery = 76; m.temp = 30; m.wx = 4; run("clock_wx_battery", m, kSleepy, 1000, 240); }
-    for (g_style = 0; g_style < 3; g_style++) {
+    for (g_style = 0; g_style < 4; g_style++) {
         std::string p = std::string("idle") + (char)('A' + g_style) + "_";
         { Model m = idle; m.screen = kScreenClock; m.hh = 14; m.mm = 32; m.ss = 0; m.wday = 0; m.mday = 25; m.mon = 10; m.temp = 32; m.wx = 3; run(p + "cloud", m, kSleepy, 6000, 240); }
         { Model m = idle; m.screen = kScreenClock; m.hh = 7; m.mm = 5; m.ss = 0; m.wday = 1; m.mday = 26; m.mon = 10; m.temp = 27; m.wx = 4; run(p + "rain", m, kSleepy, 1000, 240); }
         { Model m = idle; m.screen = kScreenClock; m.hh = 21; m.mm = 48; m.ss = 30; m.wday = 6; m.mday = 31; m.mon = 10; run(p + "nowx", m, kSleepy, 1000, 240); }
         { Model m = idle; m.screen = kScreenClock; m.hh = 10; m.mm = 10; m.battery = 76; m.temp = 33; m.wx = 1; m.wday = 2; m.mday = 27; m.mon = 10; run(p + "battery", m, kSleepy, 1000, 240); }
     }
-    g_style = 1;
+    g_style = 3;
     return 0;
 }
