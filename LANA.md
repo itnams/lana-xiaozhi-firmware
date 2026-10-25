@@ -127,3 +127,12 @@ maps every `SetPowerSaveMode()` call to `WIFI_PS_NONE` and forces it right after
   (idle: no session is opened); during normal replies nothing listens (unchanged). Flag cleared on channel close.
 - Push `{"type":"lana","action":"weather","temp":31,"icon":"sun|partly|cloud|rain|storm"}` (server lanawx.py, Open-Meteo,
   every 15 min): icon + temperature at the bottom-right of the idle clock, date moves left; hidden after 2 h without update.
+
+## 2.2.6-lana (Oct 25): faces with a mouth
+- Every emotion now has a mouth (smile, open smile, frown, teeth, cat "ω", wavy, o/O, smirk, tongue, pucker...) drawn
+  in a bottom band (~28 % of the face area, 10-18 px); eyes shrink into the area above it. Mouth follows gaze/bob/tremble.
+- While speaking the mouth opens/closes with the syllable envelope (open smile, open frown for sad, round O for surprised).
+- `Renderer::SetMouth(false)` restores eyes-only. Previews: `tools/eyes_preview.cc` scenarios `face_*`, `talk_*`.
+- Idle clock redesigned: rounded capsule 7-segment digits, round blinking colon, dotted separator, info row
+  (date left, weather icon + temp / battery right). `Ui::SetClockStyle(0|1|2)`: A default, B clock + dozing face,
+  C clock + seconds bar. Previews: `idleA_*`, `idleB_*`, `idleC_*`.

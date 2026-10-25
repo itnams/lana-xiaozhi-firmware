@@ -12,6 +12,9 @@
 #include "lana_font_vi.h"
 #include <cstdint>
 #include <cstring>
+#include <cmath>
+#include <algorithm>
+#include <cstdio>
 #include <string>
 
 namespace lana_ui {
@@ -271,37 +274,93 @@ private:
         if (sub) Subtitle(c, m.subtitle, H - kSubH);
     }
 
+    // ---- 2.2.6 idle clock: rounded capsule 7-segment digits, tidy info row, optional tiny sleeping face ----------
+    static void Capsule(Canvas& c, float ax, float ay, float bx, float by, float r) {
+        int x0 = (int)std::floor(std::min(ax, bx) - r), x1 = (int)std::ceil(std::max(ax, bx) + r);
+        int y0 = (int)std::floor(std::min(ay, by) - r), y1 = (int)std::ceil(std::max(ay, by) + r);
+        float dx = bx - ax, dy = by - ay, l2 = dx * dx + dy * dy;
+        for (int y = y0; y <= y1; y++) for (int x = x0; x <= x1; x++) {
+            float px = x + 0.5f - ax, py = y + 0.5f - ay;
+            float t = l2 > 0 ? (px * dx + py * dy) / l2 : 0; t = t < 0 ? 0 : t > 1 ? 1 : t;
+            float qx = px - t * dx, qy = py - t * dy;
+            if (qx * qx + qy * qy <= r * r) c.Set(x, y);
+        }
+    }
+    static void RoundDigit(Canvas& c, int x, int y, int w, int h, float th, int d) {
+        static const uint8_t seg[10] = {0x3F, 0x06, 0x5B, 0x4F, 0x66, 0x6D, 0x7D, 0x07, 0x7F, 0x6F};
+        uint8_t m = seg[d < 0 || d > 9 ? 8 : d];
+        float r = th / 2, g = r + 1.2f;                       // capsule radius, gap at the joints
+        float L = x + r, R = x + w - r, T = y + r, B = y + h - r, M = y + h / 2.0f;
+        if (m & 0x01) Capsule(c, L + g, T, R - g, T, r);
+        if (m & 0x40) Capsule(c, L + g, M, R - g, M, r);
+        if (m & 0x08) Capsule(c, L + g, B, R - g, B, r);
+        if (m & 0x20) Capsule(c, L, T + g, L, M - g, r);
+        if (m & 0x02) Capsule(c, R, T + g, R, M - g, r);
+        if (m & 0x10) Capsule(c, L, M + g, L, B - g, r);
+        if (m & 0x04) Capsule(c, R, M + g, R, B - g, r);
+    }
+    static void Dot(Canvas& c, float cx, float cy, float r) { Capsule(c, cx, cy, cx, cy, r); }
+    // HH:MM centred in [x0, x0+span); colon = two round dots, solid on even seconds, small on odd (soft pulse)
+    void ClockDigits(Canvas& c, const Model& m, int x0, int span, int y0, int dw, int dh, float th, int gap, int colon) {
+        int total = dw * 4 + gap * 2 + colon, x = x0 + (span - total) / 2;
+        RoundDigit(c, x, y0, dw, dh, th, m.hh / 10); x += dw + gap;
+        RoundDigit(c, x, y0, dw, dh, th, m.hh % 10); x += dw;
+        float cr = th * 0.5f;
+        if (m.ss % 2 == 0) { Dot(c, x + colon / 2.0f, y0 + dh * 0.32f, cr); Dot(c, x + colon / 2.0f, y0 + dh * 0.70f, cr); }
+        x += colon;
+        RoundDigit(c, x, y0, dw, dh, th, m.mm / 10); x += dw + gap;
+        RoundDigit(c, x, y0, dw, dh, th, m.mm % 10);
+    }
+    void Dotted(Canvas& c, int x0, int x1, int y) { for (int x = x0; x <= x1; x += 3) c.Set(x, y); }
+    // bottom info row at y: date (left) + weather/battery (right)
+    void InfoRow(Canvas& c, const Model& m, int x0, int x1, int y) {
+        std::string d = ShortDate(m.wday, m.mday, m.mon);
+        int right = x1;
+        if (m.battery >= 0) { IconBattery(c, right - 10, y + 4, m.battery, m.charging); right -= 15; }
+        if (m.wx > 0) {
+            char t[12]; snprintf(t, sizeof(t), "%d°", m.temp);
+            int tx = right - TextWidth(t); c.Text(tx, y, t); IconWeather(c, tx - 13, y + 3, m.wx); right = tx - 16;
+        }
+        if (x0 + TextWidth(d) <= right) c.Text(x0, y, d);
+    }
+    void SleepFace(Canvas& c, int cx, int cy) {   // tiny dozing face: closed eyes + small mouth, slow breath, Zzz
+        int br = ((t_ / 1000) % 4) < 2 ? 0 : 1;
+        for (int k = -1; k <= 1; k += 2) for (int i = -4; i <= 4; i++) { int yy = cy + br + 2 - (i * i) / 8; c.Set(cx + k * 8 + i, yy); c.Set(cx + k * 8 + i, yy + 1); }
+        c.Fill(cx - 1, cy + 8 + br, 3, 3); c.Set(cx - 1, cy + 8 + br, 0); c.Set(cx + 1, cy + 8 + br, 0); c.Set(cx - 1, cy + 10 + br, 0); c.Set(cx + 1, cy + 10 + br, 0);
+        float ph = (t_ % 3000) / 3000.0f;
+        int zs = 2 + (int)(ph * 3), zx = cx + 12 + (int)(ph * 4), zy = cy - 5 - (int)(ph * 8);
+        for (int i = 0; i <= zs; i++) { c.Set(zx + i, zy); c.Set(zx + i, zy + zs); c.Set(zx + zs - i, zy + i); }
+    }
+public:
+    void SetClockStyle(int s) { clock_style_ = s; }
+private:
+    int clock_style_ = 0;
+
     void RenderClock(Canvas& c, const Model& m) {
-        // burn-in care: the whole clock drifts by 1 px in a 4-minute cycle
+        // burn-in care: the whole screen drifts by 1 px in a 4-minute cycle
         static const int kdx[4] = {0, 1, 1, 0}, kdy[4] = {0, 0, 1, 1};
         int dx = kdx[m.mm % 4], dy = kdy[m.mm % 4];
-        const int dw = 23, dh = 38, th = 5, gap = 4, colon = 10, y0 = 2 + dy;
-        int total = dw * 4 + gap * 2 + colon;
-        int x = (W - total) / 2 + dx;
-        Digit(c, x, y0, dw, dh, th, m.hh / 10); x += dw + gap;
-        Digit(c, x, y0, dw, dh, th, m.hh % 10); x += dw;
-        if (m.ss % 2 == 0) { c.Fill(x + 3, y0 + 10, 4, 4); c.Fill(x + 3, y0 + dh - 14, 4, 4); }
-        x += colon;
-        Digit(c, x, y0, dw, dh, th, m.mm / 10); x += dw + gap;
-        Digit(c, x, y0, dw, dh, th, m.mm % 10);
-        if (m.battery >= 0) { char b[16]; snprintf(b, sizeof(b), "%d%%", m.battery);
-            IconBattery(c, W - 13 + dx - 1, 54 + dy, m.battery, m.charging);
-            if (!(BatteryLow(m) && (t_ / 500) % 2)) c.Text(W - 15 - TextWidth(b) + dx, 49 + dy, b); }
-        std::string d = ShortDate(m.wday, m.mday, m.mon);
-        if (m.wx > 0) {   // date left, weather (icon + "31°") right; with a battery shown: weather left, no date
-            char t[12]; snprintf(t, sizeof(t), "%d°", m.temp);
-            if (m.battery >= 0) {
-                IconWeather(c, 2 + dx, 52 + dy, m.wx);
-                c.Text(15 + dx, 49 + dy, t);
-            } else {
-                int tx = W - 2 + dx - TextWidth(t);
-                c.Text(tx, 49 + dy, t);
-                IconWeather(c, tx - 13, 52 + dy, m.wx);
-                c.Text(2 + dx, 49 + dy, d);
-            }
-        } else {
-            c.Text((W - TextWidth(d)) / 2 + dx, 49 + dy, d);
+        if (clock_style_ == 1) {          // B: clock left + date under it, dozing face + weather on the right
+            ClockDigits(c, m, 0 + dx, 84, 4 + dy, 15, 30, 3.6f, 3, 8);
+            c.Text(4 + dx, 40 + dy, ShortDate(m.wday, m.mday, m.mon));
+            for (int y = 6; y < 58; y += 3) c.Set(86 + dx, y + dy);
+            SleepFace(c, 106 + dx, 18 + dy);
+            if (m.wx > 0) { char t[12]; snprintf(t, sizeof(t), "%d°", m.temp);
+                int w = 13 + TextWidth(t), x = 107 - w / 2 + dx; IconWeather(c, x, 44 + dy, m.wx); c.Text(x + 13, 41 + dy, t); }
+            if (m.battery >= 0) IconBattery(c, W - 13 + dx, 56 + dy, m.battery, m.charging);
+            return;
         }
+        if (clock_style_ == 2) {          // C: big clock, minute progress line, info row
+            ClockDigits(c, m, dx, W, 2 + dy, 24, 38, 5.0f, 5, 12);
+            int len = 8 + (W - 18) * m.ss / 59;
+            c.HLine(4 + dx, 4 + len + dx, 45 + dy);
+            InfoRow(c, m, 3 + dx, W - 3 + dx, 49 + dy);
+            return;
+        }
+        // A (default): big rounded clock, dotted separator, date left / weather right
+        ClockDigits(c, m, dx, W, 3 + dy, 24, 37, 5.0f, 5, 12);
+        Dotted(c, 4 + dx, W - 5 + dx, 46 + dy);
+        InfoRow(c, m, 3 + dx, W - 3 + dx, 49 + dy);
     }
 
     void RenderAlarm(Canvas& c, const Model& m) {

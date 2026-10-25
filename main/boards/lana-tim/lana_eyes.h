@@ -36,6 +36,16 @@ inline int EmotionFromName(const char* name) {
     return -1;
 }
 
+// 2.2.6: mouth shapes drawn under the eyes (band at the bottom of the face area)
+enum Mouth { kMFlat, kMSmile, kMBigOpen, kMFrown, kMOpenFrown, kMTeeth, kMCat, kMWavy, kMO, kMBigO, kMSmirk,
+             kMSoft, kMTongueSide, kMPucker, kMSmallO, kMSillyTongue, kMLopsided };
+inline int MouthFor(int e) {
+    static const uint8_t m[] = {kMFlat, kMSmile, kMBigOpen, kMLopsided, kMFrown, kMTeeth, kMOpenFrown, kMCat, kMWavy, kMO,
+                                kMBigO, kMSmirk, kMSmile, kMSmirk, kMSoft, kMTongueSide, kMPucker, kMSmirk, kMSmallO,
+                                kMSillyTongue, kMWavy, kMBigO};
+    return (e >= 0 && e < (int)sizeof(m)) ? m[e] : kMFlat;
+}
+
 enum State { kStateIdle, kStateListening, kStateSpeaking, kStateConnecting };
 
 struct EyeShape {
@@ -105,6 +115,7 @@ public:
     // Leave room at the bottom for a subtitle line (eyes squeeze into the top part)
     void SetReservedBottom(int px) { reserved_bottom_ = px < 0 ? 0 : (px > 40 ? 40 : px); }
     void SetDrawBell(bool on) { draw_bell_ = on; }
+    void SetMouth(bool on) { mouth_on_ = on; }
     void ShowVolume(int volume, int duration_ms = 1500) { volume_ = volume; volume_ms_ = duration_ms; }
 
     // Advance time by dt milliseconds
@@ -182,11 +193,15 @@ public:
         memset(px, 0, W * H);
         const Face& f = FaceFor(emotion_);
         int area_h = H - reserved_bottom_;
+        // 2.2.6: the bottom band of the face holds the mouth; eyes use the part above it
+        int band = mouth_on_ ? (int)(area_h * 0.28f + 0.5f) : 0;
+        if (mouth_on_) { if (band < 10) band = 10; if (band > 18) band = 18; }
+        int eye_h = area_h - band;
         // 2.2.4: eyes grow to fill the free area (full 64 rows -> ~1.3x the 2.2.3 size), shrink with strips
-        float vscale = area_h / 46.0f; if (vscale > 1.32f) vscale = 1.32f; if (vscale < 0.6f) vscale = 0.6f;
+        float vscale = eye_h / 46.0f; if (vscale > 1.32f) vscale = 1.32f; if (vscale < 0.6f) vscale = 0.6f;
         float hscale = vscale > 1.0f ? 1.0f + (vscale - 1.0f) * 0.75f : 1.0f;
         float sep = 30.0f + (vscale > 1.0f ? (vscale - 1.0f) * 12.0f : 0.0f);
-        float cy = area_h * 0.5f;
+        float cy = eye_h * 0.5f + (mouth_on_ ? 1.0f : 0.0f);
         float t = t_ / 1000.0f;
 
         float bob = 0, shake = 0;
@@ -234,6 +249,7 @@ public:
                 }
             }
         }
+        if (mouth_on_) DrawMouth(px, area_h, band, bob);
         if (f.anim & kAnimZzz) DrawZzz(px, area_h);
         if ((f.anim & kAnimBell) && draw_bell_) DrawBell(px, 64 + ((((t_ / 90) % 2) ? 2 : -2)), 9, (t_ / 180) % 2 == 0, area_h);
         if (f.anim & kAnimDots) {
@@ -298,6 +314,7 @@ private:
     int syll_ms_ = 0;
     int reserved_bottom_ = 0;
     bool draw_bell_ = true;
+    bool mouth_on_ = true;
     int volume_ = 0, volume_ms_ = 0;
     EyeShape cur_[2];
 
@@ -421,6 +438,92 @@ private:
         FillCircle(px, cx, cy + 7.5f, 1.6f, area_h);
         Set(px, cx, cy - 7, area_h);
         if (ring) for (int k = 0; k < 3; k++) { Set(px, cx - 9 - k, cy - 3 + k * 3, area_h); Set(px, cx + 9 + k, cy - 3 + k * 3, area_h); }
+    }
+
+    // thick parabola: y = cy + bend*(1-u^2) for u in [-1,1]  (bend>0 = smile, <0 = frown)
+    static void Curve(uint8_t* px, float cx, float cy, float hw, float bend, int th, int area_h, float tilt = 0) {
+        for (int x = (int)std::floor(cx - hw); x <= (int)std::ceil(cx + hw); x++) {
+            float u = (x + 0.5f - cx) / hw; if (u < -1 || u > 1) continue;
+            float y = cy - bend * 0.5f + bend * (1 - u * u) + tilt * u;
+            for (int k = 0; k < th; k++) Set(px, x, (int)std::floor(y) + k, area_h);
+        }
+    }
+    static void FillEllipse(uint8_t* px, float cx, float cy, float rx, float ry, int area_h, bool clear = false) {
+        for (int y = (int)(cy - ry - 1); y <= (int)(cy + ry + 1); y++)
+            for (int x = (int)(cx - rx - 1); x <= (int)(cx + rx + 1); x++) {
+                float dx = (x + 0.5f - cx) / rx, dy = (y + 0.5f - cy) / ry;
+                if (dx * dx + dy * dy <= 1) { if (clear) Clear(px, x, y, area_h); else Set(px, x, y, area_h); }
+            }
+    }
+    // open "D" mouth: flat-ish top, round bottom, height hgt
+    static void OpenSmile(uint8_t* px, float cx, float top, float hw, float hgt, int area_h, bool tongue) {
+        for (int y = (int)top; y <= (int)(top + hgt); y++) {
+            float v = (y + 0.5f - top) / hgt; if (v > 1) continue;
+            float half = hw * std::sqrt(1 - v * v) ;
+            if (y == (int)top) half -= 1;
+            for (int x = (int)std::floor(cx - half); x <= (int)std::ceil(cx + half) - 1; x++) Set(px, x, y, area_h);
+        }
+        if (tongue && hgt >= 5) FillEllipse(px, cx + 1, top + hgt * 0.84f, hw * 0.34f, hgt * 0.20f, area_h, true);
+    }
+
+    void DrawMouth(uint8_t* px, int area_h, int band, float bob) const {
+        const Face& f = FaceFor(emotion_);
+        float s = band / 16.0f; if (s < 0.65f) s = 0.65f;
+        float cx = 64 + gaze_x_ * 0.45f + ((f.anim & kAnimTremble) ? ((((t_ / 45) % 2) ? 0.9f : -0.9f)) : 0);
+        float cy = area_h - band * 0.5f + bob * 0.4f;
+        int th = s >= 0.85f ? 2 : 1;
+        float t = t_ / 1000.0f;
+        // talking: syllable envelope opens the mouth (0..1)
+        float open = 0;
+        if (state_ == kStateSpeaking || syll_amp_ > 0.05f) {
+            open = syll_amp_ * std::fabs(std::sin(talk_phase_)) / 2.0f; if (open > 1) open = 1;
+        }
+        int m = MouthFor(emotion_);
+        if (open > 0.12f && m != kMPucker && m != kMTeeth) {
+            // keep the emotion's character while talking: sad = open frown, else open smile / round o
+            float hw = 9 * s, hg = (2.5f + open * 8.5f) * s;
+            if (m == kMFrown || m == kMOpenFrown) { FillEllipse(px, cx, cy + 1, hw * 0.8f, hg * 0.5f + 1, area_h); FillEllipse(px, cx, cy + 1 + hg * 0.5f, hw * 0.8f, hg * 0.35f, area_h, true); return; }
+            if (m == kMO || m == kMBigO || m == kMSmallO) { FillEllipse(px, cx, cy, (4 + open * 2) * s, hg * 0.5f + 1, area_h); return; }
+            OpenSmile(px, cx, cy - hg * 0.45f, hw, hg, area_h, m == kMTongueSide || m == kMSillyTongue);
+            return;
+        }
+        switch (m) {
+            case kMFlat: for (int k = 0; k < th; k++) DrawHLine(px, cx - 6 * s, cx + 6 * s, cy + k, area_h); break;
+            case kMSmile: Curve(px, cx, cy - 2, 11 * s, 6 * s, th, area_h); break;
+            case kMSoft: Curve(px, cx, cy - 1, 7 * s, 3 * s, th, area_h); break;
+            case kMBigOpen: { float hg = (11 + 1.5f * std::sin(t * 18.8f)) * s; OpenSmile(px, cx, cy - hg * 0.5f, 12 * s, hg, area_h, false); break; }
+            case kMLopsided: { float hg = 8 * s; OpenSmile(px, cx + 2, cy - hg * 0.5f, 11 * s, hg, area_h, false);
+                               for (int x = 0; x < (int)(6 * s); x++) Clear(px, (int)(cx + 2 - 11 * s) + x, (int)(cy - hg * 0.5f) + (int)(x * 0.0f), area_h); break; }
+            case kMFrown: Curve(px, cx, cy + 1, 9 * s, -4.5f * s, th, area_h); break;
+            case kMOpenFrown: { float w = 9 * s + 0.8f * std::sin(t * 12);
+                                FillEllipse(px, cx, cy + 1 * s, w, 6 * s, area_h); FillEllipse(px, cx, cy + 6.5f * s, w * 1.05f, 3.5f * s, area_h, true); break; }
+            case kMTeeth: { int x0 = (int)(cx - 10 * s), x1 = (int)(cx + 10 * s), y0 = (int)(cy - 3 * s), y1 = (int)(cy + 3 * s);
+                            for (int y = y0; y <= y1; y++) for (int x = x0; x <= x1; x++) Set(px, x, y, area_h);
+                            for (int x = x0 + 1; x < x1; x++) Clear(px, x, (y0 + y1) / 2, area_h);
+                            for (int x = x0 + 4; x < x1; x += 4) for (int y = y0 + 1; y < y1; y++) Clear(px, x, y, area_h);
+                            Clear(px, x0, y0, area_h); Clear(px, x1, y0, area_h); Clear(px, x0, y1, area_h); Clear(px, x1, y1, area_h); break; }
+            case kMCat: Curve(px, cx - 4 * s, cy - 1, 4.5f * s, 3.5f * s, th, area_h); Curve(px, cx + 4 * s, cy - 1, 4.5f * s, 3.5f * s, th, area_h); break;
+            case kMWavy: for (int x = (int)(cx - 9 * s); x <= (int)(cx + 9 * s); x++) {
+                             float y = cy + 1.8f * s * std::sin((x - cx) / (2.6f * s) + t * 3);
+                             for (int k = 0; k < th; k++) Set(px, x, (int)std::floor(y) + k, area_h); } break;
+            case kMO: FillEllipse(px, cx, cy, 4.5f * s, 4.5f * s, area_h); FillEllipse(px, cx, cy, 4.5f * s - th, 4.5f * s - th, area_h, true); break;
+            case kMBigO: { float r = (6 + 0.6f * std::sin(t * 14)) * s; FillEllipse(px, cx, cy, r * 0.8f, r, area_h); break; }
+            case kMSmallO: { float r = (2.2f + 0.6f * std::sin(t * 1.6f)) * s; FillEllipse(px, cx + 3, cy + 1, r, r, area_h); break; }
+            case kMSmirk: Curve(px, cx + 2, cy, 8 * s, 2.5f * s, th, area_h, -2.5f * s); break;
+            case kMTongueSide: { Curve(px, cx, cy - 2, 10 * s, 4 * s, th, area_h);
+                                 float tx = cx + 5 * s, ty = cy + 2.5f * s + 0.8f * std::sin(t * 6);
+                                 FillEllipse(px, tx, ty, 3.2f * s, 3.4f * s, area_h); for (int y = (int)(ty - 3 * s); y < (int)(ty); y++) Clear(px, (int)tx, y, area_h);
+                                 Curve(px, cx, cy - 2, 10 * s, 4 * s, th, area_h); break; }
+            case kMPucker: { // "3"-ish kiss lips
+                             float r = 2.6f * s; Curve(px, cx + r * 0.3f, cy - r, r, -0.0f, th, area_h);
+                             for (int k = 0; k < 2; k++) { float yc = cy - r * 0.5f + k * r * 1.6f;
+                               for (int y = (int)(yc - r); y <= (int)(yc + r); y++) { float dy = (y + 0.5f - yc) / r; if (dy * dy > 1) continue;
+                                 float x = cx - r * 0.4f + r * std::sqrt(1 - dy * dy); for (int q = 0; q < th; q++) Set(px, (int)x + q, y, area_h); } } break; }
+            case kMSillyTongue: { for (int k = 0; k < th; k++) DrawHLine(px, cx - 9 * s, cx + 9 * s, cy - 2 + k, area_h);
+                                  float ty = cy + 2 * s + 0.8f * std::sin(t * 7);
+                                  FillEllipse(px, cx - 2 * s, ty, 4 * s, 4 * s, area_h); for (int y = (int)(cy - 1); y < (int)(cy + 0) + th; y++) Set(px, (int)(cx - 6 * s), y, area_h);
+                                  for (int y = (int)(ty - 3 * s); y < (int)(ty + 1); y++) Clear(px, (int)(cx - 2 * s), y, area_h); break; }
+        }
     }
 
     void DrawVolume(uint8_t* px, int area_h) const {
