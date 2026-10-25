@@ -493,7 +493,8 @@ private:
             case kMSoft: Curve(px, cx, cy - 1, 7 * s, 3 * s, th, area_h); break;
             case kMBigOpen: { float hg = (11 + 1.5f * std::sin(t * 18.8f)) * s; OpenSmile(px, cx, cy - hg * 0.5f, 12 * s, hg, area_h, false); break; }
             case kMLopsided: { float hg = 8 * s; OpenSmile(px, cx + 2, cy - hg * 0.5f, 11 * s, hg, area_h, false);
-                               for (int x = 0; x < (int)(6 * s); x++) Clear(px, (int)(cx + 2 - 11 * s) + x, (int)(cy - hg * 0.5f) + (int)(x * 0.0f), area_h); break; }
+                               for (int x = 0; x < (int)(6 * s); x++) Clear(px, (int)(cx + 2 - 11 * s) + x, (int)(cy - hg * 0.5f) + (int)(x * 0.0f), area_h);
+                               break; }
             case kMFrown: Curve(px, cx, cy + 1, 9 * s, -4.5f * s, th, area_h); break;
             case kMOpenFrown: { float w = 9 * s + 0.8f * std::sin(t * 12);
                                 FillEllipse(px, cx, cy + 1 * s, w, 6 * s, area_h); FillEllipse(px, cx, cy + 6.5f * s, w * 1.05f, 3.5f * s, area_h, true); break; }
@@ -522,7 +523,8 @@ private:
             case kMSillyTongue: { for (int k = 0; k < th; k++) DrawHLine(px, cx - 9 * s, cx + 9 * s, cy - 2 + k, area_h);
                                   float ty = cy + 2 * s + 0.8f * std::sin(t * 7);
                                   FillEllipse(px, cx - 2 * s, ty, 4 * s, 4 * s, area_h); for (int y = (int)(cy - 1); y < (int)(cy + 0) + th; y++) Set(px, (int)(cx - 6 * s), y, area_h);
-                                  for (int y = (int)(ty - 3 * s); y < (int)(ty + 1); y++) Clear(px, (int)(cx - 2 * s), y, area_h); break; }
+                                  for (int y = (int)(ty - 3 * s); y < (int)(ty + 1); y++) Clear(px, (int)(cx - 2 * s), y, area_h);
+                                  break; }
         }
     }
 
